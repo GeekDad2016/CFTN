@@ -6,19 +6,16 @@ from tqdm import tqdm
 import torchvision
 from model.vqvae import get_model
 from torch.utils.data.dataloader import DataLoader
-from dataset.mnist_dataset import MnistDataset
 from dataset.naruto_dataset import NarutoDataset
 from torchvision.utils import make_grid
 from einops import rearrange
 import pickle
-
+import wandb
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_dataset(config, split):
-    if config['train_params']['dataset'] == 'mnist':
-        dataset = MnistDataset(split, config['train_params']['train_path'], im_channels=config['model_params']['in_channels'])
-    elif config['train_params']['dataset'] == 'naruto':
+    if config['train_params']['dataset'] == 'naruto':
         dataset = NarutoDataset(split=split)
     else:
         raise ValueError("Unknown dataset")
@@ -30,7 +27,7 @@ def reconstruct(config, model, dataset, num_images=100):
     :param config: Config file used to create the model
     :param model: Trained model
     :param dataset: Dataset (not the data loader)
-    :param num_images: NUmber of images to visualize
+    :param num_images: Number of images to visualize
     :return:
     """
     print('Generating reconstructions')
@@ -55,6 +52,8 @@ def reconstruct(config, model, dataset, num_images=100):
     
     grid = make_grid(output.detach().cpu(), nrow=10)
     
+    wandb.log({"reconstructions": wandb.Image(grid)})
+    
     img = torchvision.transforms.ToPILImage()(grid)
     img.save(os.path.join(config['train_params']['task_name'],
                           config['train_params']['output_train_dir'],
@@ -76,10 +75,16 @@ def save_encodings(config, model, data_loader):
         model_output = model(im)
         quant_indices = model_output['quantized_indices']
         save_encodings = quant_indices if save_encodings is None else torch.cat([save_encodings, quant_indices], dim=0)
-    pickle.dump(save_encodings, open(os.path.join(config['train_params']['task_name'],
-                                                  config['train_params']['output_train_dir'],
-                                                  'encodings.pkl'), 'wb'))
+    
+    encoding_path = os.path.join(config['train_params']['task_name'],
+                                 config['train_params']['output_train_dir'],
+                                 'encodings.pkl')
+    pickle.dump(save_encodings, open(encoding_path, 'wb'))
     print('Done saving encoder outputs for lstm for training')
+    
+    artifact = wandb.Artifact('encodings', type='dataset')
+    artifact.add_file(encoding_path)
+    wandb.log_artifact(artifact)
 
 
 def inference(args):
@@ -88,6 +93,8 @@ def inference(args):
             config = yaml.safe_load(file)
         except yaml.YAMLError as exc:
             print(exc)
+    
+    wandb.init(project="vqvae-naruto-inference", config=config)
     print(config)
     
     model = get_model(config).to(device)
@@ -102,9 +109,7 @@ def inference(args):
     train_loader = DataLoader(train_dataset, batch_size=config['train_params']['batch_size'], shuffle=False, num_workers=4)
     
     with torch.no_grad():
-        # Generate Reconstructions
         reconstruct(config, model, test_dataset)
-        # Save Encoder Outputs for training lstm
         save_encodings(config, model, train_loader)
         
 

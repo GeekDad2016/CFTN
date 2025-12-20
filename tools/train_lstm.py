@@ -13,6 +13,7 @@ import pickle
 from tqdm import tqdm
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
+import wandb
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -93,28 +94,24 @@ class VQVAESeqDataset(Dataset):
         return context, target
 
 def train_lstm(args):
-    ############ Read the config #############
     with open(args.config_path, 'r') as file:
         try:
             config = yaml.safe_load(file)
         except yaml.YAMLError as exc:
             print(exc)
-    print(config)
-    #########################################
     
-    ############## Create dataset ###########
+    wandb.init(project="vqvae-naruto-lstm", config=config)
+    print(config)
+    
     dataset = VQVAESeqDataset(config)
     data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
-    #########################################
     
-    ############## Create LSTM ###########
     model = VQVAELSTM(input_size=config['lstm_params']['embedding_dim'],
                       hidden_size=config['lstm_params']['hidden_size'],
                       codebook_size=config['model_params']['codebook_size']).to(device)
     model.to(device)
     model.train()
     
-    ############## Training Params ###########
     num_epochs = config['lstm_params']['epochs']
     optimizer = Adam(model.parameters(), lr=1E-3)
     criterion = torch.nn.CrossEntropyLoss()
@@ -130,7 +127,10 @@ def train_lstm(args):
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
-        print('Epoch {} : {}'.format(epoch, np.mean(losses)))
+        
+        mean_loss = np.mean(losses)
+        print(f'Epoch {epoch} : {mean_loss}')
+        wandb.log({"epoch": epoch, "loss": mean_loss})
         print('=' * 50)
         torch.save(model.state_dict(), os.path.join(config['train_params']['task_name'],
                                                     'best_lstm.pth'))
