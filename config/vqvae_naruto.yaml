@@ -3,10 +3,10 @@ model_params:
   convbn_blocks: 4
   conv_kernel_size: [4, 4, 4, 4]
   conv_kernel_strides: [2, 2, 2, 2]
-  convbn_channels: [3, 64, 128, 256, 32]
+  convbn_channels: [3, 64, 128, 256, 512]
   conv_activation_fn: 'leaky'
   transpose_bn_blocks: 4
-  transposebn_channels: [32, 256, 128, 64, 3]
+  transposebn_channels: [512, 256, 128, 64, 3]
   transpose_kernel_size: [4, 4, 4, 4]
   transpose_kernel_strides: [2, 2, 2, 2]
   transpose_padding: [1, 1, 1, 1]
@@ -31,5 +31,5 @@ train_params:
 
 lstm_params:
   embedding_dim: 256
-  hidden_size: 32
+  hidden_size: 512
   epochs: 50

@@ -88,14 +88,15 @@ def train(args):
             print(exc)
     print(config)
     #######################################
+    print(f"Using device: {device}")
     
     ######## Set the desired seed value #######
     seed = config['train_params']['seed']
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    if device == 'cuda' and 'seed' in args:
-        torch.cuda.manual_seed_all(args.seed)
+    if device.type == 'cuda':
+        torch.cuda.manual_seed_all(seed)
     #######################################
     
     # Create the model and dataset
