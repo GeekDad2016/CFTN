@@ -74,6 +74,21 @@ def train_for_one_epoch(epoch_idx, model, data_loader, optimizer, criterion, con
     print(f'Finished epoch: {epoch_idx + 1} | Recon Loss : {np.mean(recon_losses):.4f} | '
           f'Codebook Loss : {np.mean(codebook_losses):.4f} | Commitment Loss : {np.mean(commitment_losses):.4f}')
     
+    if config['train_params']['save_training_image']:
+        output_dir = os.path.join(config['train_params']['task_name'], config['train_params']['output_train_dir'], 'results')
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Create a grid of images
+        input_grid = make_grid((im.detach() + 1) / 2)
+        output_grid = make_grid((output.detach() + 1) / 2)
+        
+        # Convert to numpy and save
+        input_numpy = (255 * input_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        output_numpy = (255 * output_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+        cv2.imwrite(os.path.join(output_dir, f'input_epoch_{epoch_idx}.jpeg'), cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(output_dir, f'output_epoch_{epoch_idx}.jpeg'), cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
+    
     with torch.no_grad():
         model.eval()
         reconstructions = model(val_images)['generated_image']
