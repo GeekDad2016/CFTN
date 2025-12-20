@@ -11,17 +11,27 @@ from tqdm import tqdm
 from model.vqvae import get_model
 from torch.utils.data.dataloader import DataLoader
 from dataset.mnist_dataset import MnistDataset
+from dataset.naruto_dataset import NarutoDataset
 from torch.optim import Adam
 from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def train_for_one_epoch(epoch_idx, model, mnist_loader, optimizer, crtierion, config):
+def get_dataset(config):
+    if config['train_params']['dataset'] == 'mnist':
+        dataset = MnistDataset('train', config['train_params']['train_path'], im_channels=config['model_params']['in_channels'])
+    elif config['train_params']['dataset'] == 'naruto':
+        dataset = NarutoDataset()
+    else:
+        raise ValueError("Unknown dataset")
+    return dataset
+
+def train_for_one_epoch(epoch_idx, model, data_loader, optimizer, crtierion, config):
     r"""
     Method to run the training for one epoch.
     :param epoch_idx: iteration number of current epoch
     :param model: VQVAE model
-    :param mnist_loader: Data loder for mnist
+    :param data_loader: Data loder for the dataset
     :param optimizer: optimzier to be used taken from config
     :param crtierion: For computing the loss
     :param config: configuration for the current run
@@ -33,7 +43,7 @@ def train_for_one_epoch(epoch_idx, model, mnist_loader, optimizer, crtierion, co
     losses = []
     # We ignore the label for VQVAE
     count = 0
-    for im, _ in tqdm(mnist_loader):
+    for im, _ in tqdm(data_loader):
         im = im.float().to(device)
         optimizer.zero_grad()
         model_output = model(im)
@@ -41,8 +51,16 @@ def train_for_one_epoch(epoch_idx, model, mnist_loader, optimizer, crtierion, co
         quantize_losses = model_output['quantized_losses']
 
         if config['train_params']['save_training_image']:
-            cv2.imwrite('input.jpeg', (255 * (im.detach() + 1) / 2).cpu().permute((0, 2, 3, 1)).numpy()[0])
-            cv2.imwrite('output.jpeg', (255 * (output.detach() + 1) / 2).cpu().permute((0, 2, 3, 1)).numpy()[0])
+            # Create a grid of images
+            input_grid = make_grid((im.detach() + 1) / 2)
+            output_grid = make_grid((output.detach() + 1) / 2)
+            
+            # Convert to numpy and save
+            input_numpy = (255 * input_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+            output_numpy = (255 * output_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+
+            cv2.imwrite('input.jpeg', cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('output.jpeg', cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
             
         recon_loss = crtierion(output, im)
         loss = (config['train_params']['reconstruction_loss_weight']*recon_loss +
@@ -77,14 +95,14 @@ def train(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    if device == 'cuda':
+    if device == 'cuda' and 'seed' in args:
         torch.cuda.manual_seed_all(args.seed)
     #######################################
     
     # Create the model and dataset
     model = get_model(config).to(device)
-    mnist = MnistDataset('train', config['train_params']['train_path'], im_channels=config['model_params']['in_channels'])
-    mnist_loader = DataLoader(mnist, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=0)
+    dataset = get_dataset(config)
+    data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=0)
     num_epochs = config['train_params']['epochs']
     optimizer = Adam(model.parameters(), lr=config['train_params']['lr'])
     scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=1, verbose=True)
@@ -110,7 +128,7 @@ def train(args):
     best_loss = np.inf
     
     for epoch_idx in range(num_epochs):
-        mean_loss = train_for_one_epoch(epoch_idx, model, mnist_loader, optimizer, criterion, config)
+        mean_loss = train_for_one_epoch(epoch_idx, model, data_loader, optimizer, criterion, config)
         scheduler.step(mean_loss)
         # Simply update checkpoint if found better version
         if mean_loss < best_loss:
@@ -125,6 +143,6 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Arguments for vq vae training')
     parser.add_argument('--config', dest='config_path',
-                        default='config/vqvae_colored_mnist.yaml', type=str)
+                        default='config/vqvae_naruto.yaml', type=str)
     args = parser.parse_args()
     train(args)

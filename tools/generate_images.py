@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torchvision
 from model.vqvae import get_model
 from torchvision.utils import make_grid
-from tools.train_lstm import MnistLSTM
+from tools.train_lstm import VQVAELSTM
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -46,29 +46,26 @@ def generate(args):
     #########################################
     
     ########## Load LSTM ##############
-    default_lstm_config = {
-        'input_size': 2,
-        'hidden_size': 128,
-        'codebook_size': config['model_params']['codebook_size']
-    }
-    
-    model = MnistLSTM(input_size=default_lstm_config['input_size'],
-                      hidden_size=default_lstm_config['hidden_size'],
-                      codebook_size=default_lstm_config['codebook_size']).to(device)
+    model = VQVAELSTM(input_size=config['lstm_params']['embedding_dim'],
+                      hidden_size=config['lstm_params']['hidden_size'],
+                      codebook_size=config['model_params']['codebook_size']).to(device)
     model.to(device)
     assert os.path.exists(os.path.join(config['train_params']['task_name'],
-                                                    'best_mnist_lstm.pth')), "Train the lstm first"
+                                                    'best_lstm.pth')), "Train the lstm first"
     model.load_state_dict(torch.load(os.path.join(config['train_params']['task_name'],
-                                                    'best_mnist_lstm.pth'), map_location=device))
+                                                    'best_lstm.pth'), map_location=device))
     model.eval()
     #########################################
     
     ################ Generate Samples #############
     generated_quantized_indices = []
-    mnist_encodings = pickle.load(open(os.path.join(config['train_params']['task_name'],
-                                                    config['train_params']['output_train_dir'],
-                                                    'mnist_encodings.pkl'), 'rb'))
-    mnist_encodings_length = mnist_encodings.reshape(mnist_encodings.size(0), -1).shape[-1]
+    encodings_path = os.path.join(config['train_params']['task_name'],
+                                  config['train_params']['output_train_dir'],
+                                  'encodings.pkl')
+    assert os.path.exists(encodings_path), "Generate encodings first"
+    
+    encodings = pickle.load(open(encodings_path, 'rb'))
+    encodings_length = encodings.reshape(encodings.size(0), -1).shape[-1]
     # Assume fixed contex size
     context_size = 32
     num_samples = 100
@@ -77,7 +74,7 @@ def generate(args):
         # Initialize with start token
         ctx = torch.ones((1)).to(device) * (config['model_params']['codebook_size'])
         
-        for i in range(mnist_encodings_length):
+        for i in range(encodings_length):
             padded_ctx = ctx
             if len(ctx) < context_size:
                 # Pad context with pad token
@@ -102,9 +99,6 @@ def generate(args):
     # Transform from -1, 1 range to 0,1
     output = (output + 1) / 2
     
-    if config['model_params']['in_channels'] == 3:
-        # Just because we took input as cv2.imread which is BGR so make it RGB
-        output = output[:, [2, 1, 0], :, :]
     grid = make_grid(output.detach().cpu(), nrow=10)
     
     img = torchvision.transforms.ToPILImage()(grid)
@@ -115,6 +109,6 @@ def generate(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Arguments for LSTM generation')
     parser.add_argument('--config', dest='config_path',
-                        default='config/vqvae_colored_mnist.yaml', type=str)
+                        default='config/vqvae_naruto.yaml', type=str)
     args = parser.parse_args()
     generate(args)

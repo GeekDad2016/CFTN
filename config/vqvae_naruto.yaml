@@ -1,0 +1,34 @@
+model_params:
+  in_channels: 3
+  convbn_blocks: 5
+  conv_kernel_size: [4, 4, 4, 4, 4]
+  conv_kernel_strides: [2, 2, 2, 2, 1]
+  convbn_channels: [3, 64, 128, 256, 512, 256]
+  conv_activation_fn: 'leaky'
+  transpose_bn_blocks: 5
+  transposebn_channels: [256, 512, 256, 128, 64, 3]
+  transpose_kernel_size: [4, 4, 4, 4, 4]
+  transpose_kernel_strides: [1, 2, 2, 2, 2]
+  transpose_activation_fn: 'leaky'
+  latent_dim: 256
+  codebook_size : 1024
+
+train_params:
+  task_name: 'vqvae_naruto'
+  batch_size: 32
+  epochs: 100
+  lr: 0.0002
+  crit: 'l1'
+  reconstruction_loss_weight : 1
+  codebook_loss_weight : 1
+  commitment_loss_weight : 0.25
+  ckpt_name: 'best_vqvae_naruto.pth'
+  seed: 111
+  save_training_image: True
+  output_train_dir: 'output'
+  dataset: 'naruto'
+
+lstm_params:
+  embedding_dim: 256
+  hidden_size: 512
+  epochs: 50
