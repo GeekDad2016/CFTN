@@ -16,13 +16,13 @@ model_params:
 
 train_params:
   task_name: 'vqvae_naruto'
-  batch_size: 32
-  epochs: 100
+  batch_size: 128
+  epochs: 500
   lr: 0.0002
-  crit: 'l1'
-  reconstruction_loss_weight : 1
+  crit: 'l2'
+  reconstruction_loss_weight : 5
   codebook_loss_weight : 1
-  commitment_loss_weight : 0.25
+  commitment_loss_weight : 1.0
   ckpt_name: 'best_vqvae_naruto.pth'
   seed: 111
   save_training_image: True
