@@ -102,7 +102,7 @@ def train(args):
     # Create the model and dataset
     model = get_model(config).to(device)
     dataset = get_dataset(config)
-    data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=0)
+    data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     num_epochs = config['train_params']['epochs']
     optimizer = Adam(model.parameters(), lr=config['train_params']['lr'])
     scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=1, verbose=True)

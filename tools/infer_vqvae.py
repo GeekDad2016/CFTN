@@ -99,7 +99,7 @@ def inference(args):
     train_dataset = get_dataset(config, 'train')
     test_dataset = get_dataset(config, 'train') # Using train split for naruto as there is no test split.
     
-    train_loader = DataLoader(train_dataset, batch_size=config['train_params']['batch_size'], shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=config['train_params']['batch_size'], shuffle=False, num_workers=4)
     
     with torch.no_grad():
         # Generate Reconstructions

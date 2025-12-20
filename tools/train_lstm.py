@@ -104,7 +104,7 @@ def train_lstm(args):
     
     ############## Create dataset ###########
     dataset = VQVAESeqDataset(config)
-    data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=0)
+    data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     #########################################
     
     ############## Create LSTM ###########
