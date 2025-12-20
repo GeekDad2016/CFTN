@@ -9,3 +9,4 @@ tqdm
 datasets
 transformers
 Pillow
+wandb

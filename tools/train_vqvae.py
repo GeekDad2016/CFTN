@@ -58,9 +58,8 @@ def train_for_one_epoch(epoch_idx, model, data_loader, optimizer, crtierion, con
             # Convert to numpy and save
             input_numpy = (255 * input_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
             output_numpy = (255 * output_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
-
-            cv2.imwrite('input.jpeg', cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
-            cv2.imwrite('output.jpeg', cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(f'input_epoch_{epoch_idx}.jpeg', cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(f'output_epoch_{epoch_idx}.jpeg', cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
             
         recon_loss = crtierion(output, im)
         loss = (config['train_params']['reconstruction_loss_weight']*recon_loss +
