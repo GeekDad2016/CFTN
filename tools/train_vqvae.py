@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 from model.vqvae import get_model
 from torch.utils.data.dataloader import DataLoader
-from dataset.mnist_dataset import MnistDataset
+#from dataset.mnist_dataset import MnistDataset
 from dataset.naruto_dataset import NarutoDataset
 from torch.optim import Adam
 from torchvision.utils import make_grid
@@ -50,7 +50,7 @@ def train_for_one_epoch(epoch_idx, model, data_loader, optimizer, crtierion, con
         output = model_output['generated_image']
         quantize_losses = model_output['quantized_losses']
 
-        if config['train_params']['save_training_image'] and i == len(data_loader) - 1:
+        if config['train_params']['save_training_image']:
             # Create a grid of images
             input_grid = make_grid((im.detach() + 1) / 2)
             output_grid = make_grid((output.detach() + 1) / 2)
@@ -59,8 +59,8 @@ def train_for_one_epoch(epoch_idx, model, data_loader, optimizer, crtierion, con
             input_numpy = (255 * input_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
             output_numpy = (255 * output_grid).cpu().permute(1, 2, 0).numpy().astype(np.uint8)
 
-            cv2.imwrite(f'input_epoch_{epoch_idx}.jpeg', cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
-            cv2.imwrite(f'output_epoch_{epoch_idx}.jpeg', cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('input.jpeg', cv2.cvtColor(input_numpy, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('output.jpeg', cv2.cvtColor(output_numpy, cv2.COLOR_RGB2BGR))
             
         recon_loss = crtierion(output, im)
         loss = (config['train_params']['reconstruction_loss_weight']*recon_loss +
