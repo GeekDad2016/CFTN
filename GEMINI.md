@@ -1,11 +1,11 @@
 ## Project Overview
 
-This project is a PyTorch implementation of a Vector-Quantized Variational Autoencoder (VQ-VAE) for the MNIST dataset. It includes scripts for training the VQ-VAE, generating image reconstructions, and training a separate LSTM model to generate new images based on the VQ-VAE's learned latent space.
+This project is a PyTorch implementation of a Vector-Quantized Variational Autoencoder (VQ-VAE) for image generation. Initially designed for the MNIST dataset, it has been extended to support external datasets from Hugging Face, specifically `lambdalabs/naruto-blip-captions`. It includes scripts for training the VQ-VAE, generating image reconstructions, and training a separate LSTM model to generate new images based on the VQ-VAE's learned latent space.
 
 The project is structured as follows:
 
--   `config/`: Contains YAML configuration files for different VQ-VAE models (e.g., for black and white vs. colored MNIST).
--   `dataset/`: Contains the dataset loading logic for MNIST.
+-   `config/`: Contains YAML configuration files for different VQ-VAE models (e.g., for MNIST and Naruto datasets).
+-   `dataset/`: Contains the dataset loading logic, now supporting Hugging Face datasets.
 -   `model/`: Contains the core components of the VQ-VAE model, including the encoder, decoder, and quantizer.
 -   `tools/`: Contains scripts for training the VQ-VAE, performing inference, and training the generative LSTM.
 
@@ -23,22 +23,15 @@ pip install -r requirements.txt
 
 ### 2. Data Preparation
 
-The project expects the MNIST dataset to be structured in a specific way. The `README.md` provides a link to another repository for data preparation instructions. The expected structure is:
-
-```
-VQVAE-Pytorch/data/train/images/{0/1/.../9}
-    *.png
-VQVAE-Pytorch/data/test/images/{0/1/.../9}
-    *.png
-```
+The project can now use Hugging Face datasets directly, such as `lambdalabs/naruto-blip-captions`. For custom datasets, the structure will depend on the dataset loader implementation.
 
 ### 3. Running the Models
 
-The project provides several scripts for training and inference.
+The project provides several scripts for training and inference. The `--config` argument should point to the appropriate YAML configuration file.
 
 **Simple VQ-VAE:**
 
-To run a minimal VQ-VAE for quick testing and understanding:
+To run a minimal VQ-VAE for quick testing and understanding (currently set up for MNIST):
 
 ```bash
 python run_simple_vqvae.py
@@ -46,34 +39,34 @@ python run_simple_vqvae.py
 
 **Training the VQ-VAE:**
 
-To train the VQ-VAE with a specific configuration:
+To train the VQ-VAE with a specific configuration (e.g., for Naruto):
 
 ```bash
-python -m tools.train_vqvae --config config/vqvae_mnist.yaml
+python -m tools.train_vqvae --config config/vqvae_naruto.yaml
 ```
 
 **Inference with the VQ-VAE:**
 
-To generate reconstructions and save the encoder's output for LSTM training:
+To generate reconstructions and save the encoder's output for LSTM training (e.g., for Naruto):
 
 ```bash
-python -m tools.infer_vqvae --config config/vqvae_mnist.yaml
+python -m tools.infer_vqvae --config config/vqvae_naruto.yaml
 ```
 
 **Training the LSTM:**
 
-To train the LSTM model for generating images:
+To train the LSTM model for generating images (e.g., for Naruto):
 
 ```bash
-python -m tools.train_lstm --config config/vqvae_mnist.yaml
+python -m tools.train_lstm --config config/vqvae_naruto.yaml
 ```
 
 **Generating Images with the LSTM:**
 
-To generate images using the trained LSTM:
+To generate images using the trained LSTM (e.g., for Naruto):
 
 ```bash
-python -m tools.generate_images --config config/vqvae_mnist.yaml
+python -m tools.generate_images --config config/vqvae_naruto.yaml
 ```
 
 ## Development Conventions
