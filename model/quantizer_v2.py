@@ -41,8 +41,7 @@ class VectorQuantizerEMA(nn.Module):
             self.ema_cluster_size = (self.ema_cluster_size + self.epsilon) / (n + self.num_embeddings * self.epsilon) * n
             
             dw = torch.matmul(encodings.t(), flat_input)
-            self.ema_w = self.ema_w * self.decay + (1 - self.decay) * dw
-            
+            self.ema_w.data.mul_(self.decay).add_(dw, alpha=1 - self.decay)
             self.embedding.weight.data.copy_(self.ema_w / self.ema_cluster_size.unsqueeze(1))
         
         e_latent_loss = F.mse_loss(quantized.detach(), inputs)
