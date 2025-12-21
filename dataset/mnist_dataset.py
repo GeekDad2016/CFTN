@@ -8,7 +8,7 @@ from tqdm import tqdm
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.dataloader import DataLoader
 
-r"""
+"""
 Simple Dataloader for mnist.
 """
 

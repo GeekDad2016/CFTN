@@ -121,8 +121,14 @@ def train(args):
     dataset = get_dataset(config)
     data_loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     
-    val_images, _ = next(iter(DataLoader(dataset, batch_size=16, shuffle=True)))
-    val_images = val_images.to(device)
+    if config['train_params'].get('overfit_on_batch', False):
+        data_loader = [next(iter(data_loader))]
+        val_images, _ = data_loader[0]
+        val_images = val_images.to(device)
+        print("Overfitting on a single batch.")
+    else:
+        val_images, _ = next(iter(DataLoader(dataset, batch_size=16, shuffle=True)))
+        val_images = val_images.to(device)
 
     num_epochs = config['train_params']['epochs']
     optimizer = Adam(model.parameters(), lr=config['train_params']['lr'])
