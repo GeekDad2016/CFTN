@@ -15,20 +15,20 @@ model_params:
   codebook_size: 4096
 
 train_params:
-  task_name: 'vqvae_naruto_overfit'
-  batch_size: 16
-  epochs: 500
+  task_name: 'vqvae_naruto'
+  batch_size: 32
+  epochs: 200
   lr: 0.0002
   crit: 'l1'
   reconstruction_loss_weight : 1
   codebook_loss_weight : 1
   commitment_loss_weight : 1.0
-  ckpt_name: 'best_vqvae_naruto_overfit.pth'
+  ckpt_name: 'best_vqvae_naruto.pth'
   seed: 111
   save_training_image: True
   output_train_dir: 'output'
   dataset: 'naruto'
-  overfit_on_batch: True
+  overfit_on_batch: False
 
 lstm_params:
   embedding_dim: 256

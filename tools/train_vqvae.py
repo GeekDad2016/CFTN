@@ -132,7 +132,7 @@ def train(args):
 
     num_epochs = config['train_params']['epochs']
     optimizer = Adam(model.parameters(), lr=config['train_params']['lr'])
-    scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=1, verbose=True)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
     criterion = {'l1': torch.nn.L1Loss(), 'l2': torch.nn.MSELoss()}.get(config['train_params']['crit'])
     
     if not os.path.exists(config['train_params']['task_name']):
@@ -148,7 +148,8 @@ def train(args):
     
     for epoch_idx in range(num_epochs):
         mean_loss = train_for_one_epoch(epoch_idx, model, data_loader, optimizer, criterion, config, val_images)
-        scheduler.step(mean_loss)
+        scheduler.step()
+        wandb.log({"lr": optimizer.param_groups[0]['lr']})
         if mean_loss < best_loss:
             print(f'Improved Loss to {mean_loss:.4f} .... Saving Model')
             torch.save(model.state_dict(), os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name']))
