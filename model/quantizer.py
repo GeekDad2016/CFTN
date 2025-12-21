@@ -17,6 +17,7 @@ class Quantizer(nn.Module):
         
         self.decay = config.get('decay', 0.99)
         self.epsilon = config.get('epsilon', 1e-5)
+        print(f"Type of self.epsilon: {type(self.epsilon)}, value: {self.epsilon}")
 
     def forward(self, x):
         B, C, H, W = x.shape
