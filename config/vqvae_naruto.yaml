@@ -13,8 +13,6 @@ model_params:
   transpose_activation_fn: 'leaky'
   latent_dim: 512
   codebook_size: 4096
-  decay: 0.99
-  epsilon: 1e-5
 
 train_params:
   task_name: 'vqvae_naruto_overfit'
