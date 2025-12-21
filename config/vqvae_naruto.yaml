@@ -1,18 +1,18 @@
 model_params:
   in_channels: 3
-  convbn_blocks: 4
-  conv_kernel_size: [4, 4, 4, 4]
-  conv_kernel_strides: [2, 2, 2, 2]
-  convbn_channels: [3, 64, 128, 256, 512]
+  convbn_blocks: 5
+  conv_kernel_size: [4, 4, 4, 4, 4]
+  conv_kernel_strides: [2, 2, 2, 2, 2]
+  convbn_channels: [3, 64, 128, 256, 512, 512]
   conv_activation_fn: 'leaky'
-  transpose_bn_blocks: 4
-  transposebn_channels: [512, 256, 128, 64, 3]
-  transpose_kernel_size: [4, 4, 4, 4]
-  transpose_kernel_strides: [2, 2, 2, 2]
-  transpose_padding: [1, 1, 1, 1]
+  transpose_bn_blocks: 5
+  transposebn_channels: [512, 512, 256, 128, 64, 3]
+  transpose_kernel_size: [4, 4, 4, 4, 4]
+  transpose_kernel_strides: [2, 2, 2, 2, 2]
+  transpose_padding: [1, 1, 1, 1, 1]
   transpose_activation_fn: 'leaky'
-  latent_dim: 256
-  codebook_size : 1024
+  latent_dim: 512
+  codebook_size: 4096
   decay: 0.99
   epsilon: 1e-5
 
