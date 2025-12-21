@@ -16,8 +16,7 @@ class Quantizer(nn.Module):
         self.ema_w.data.normal_()
         
         self.decay = config.get('decay', 0.99)
-        self.epsilon = config.get('epsilon', 1e-5)
-        print(f"Type of self.epsilon: {type(self.epsilon)}, value: {self.epsilon}")
+        self.epsilon = float(config.get('epsilon', 1e-5))
 
     def forward(self, x):
         B, C, H, W = x.shape
