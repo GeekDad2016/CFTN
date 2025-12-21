@@ -78,7 +78,7 @@ def train(args):
             imgs = imgs.to(device)
             optimizer.zero_grad()
             
-            vq_loss, recon_img, perplexity = model(imgs)
+            vq_loss, recon_img, perplexity, _ = model(imgs)
             recon_loss = F.mse_loss(recon_img, imgs)
             total_loss = recon_loss + vq_loss
             
@@ -100,10 +100,10 @@ def train(args):
         
         model.eval()
         with torch.no_grad():
-            _, recon_sample, _, = model(val_images)
-            disp_orig = val_images * 0.5 + 0.5
-            disp_recon = recon_sample.clamp(0,1) * 0.5 + 0.5
-            grid = make_grid(torch.cat([disp_orig, disp_recon]), nrow=8)
+            _, recon_sample, _, _ = model(val_images)
+            disp_orig = (val_images * 0.5 + 0.5).clamp(0, 1)
+            disp_recon = (recon_sample * 0.5 + 0.5).clamp(0, 1)
+            grid = make_grid(torch.cat([disp_orig, disp_recon]), nrow=16)
             save_path = f"{results_dir}/epoch_{epoch_idx}.png"
             save_image(grid, save_path)
             wandb.log({"eval/recon_grid": wandb.Image(save_path)})

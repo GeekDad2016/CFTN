@@ -3,9 +3,9 @@ model_params:
   num_hiddens: 128
   num_downsampling_layers: 2
   num_upsampling_layers: 2
-  num_residual_layers: 2
+  num_residual_layers: 4
   num_residual_hiddens: 32
-  num_embeddings: 8192
+  num_embeddings: 4096
   embedding_dim: 256
   commitment_cost: 0.25
   decay: 0.99
@@ -13,7 +13,7 @@ model_params:
 train_params:
   task_name: 'vqvae_naruto_v2'
   batch_size: 64
-  epochs: 100
+  epochs: 1000
   lr: 0.0001
   ckpt_name: 'best_vqvae_naruto_v2.pth'
   seed: 111

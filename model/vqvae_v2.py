@@ -90,6 +90,6 @@ class VQVAEv2(nn.Module):
 
     def forward(self, x):
         z = self.encoder(x)
-        vq_loss, quantized, perplexity, _ = self.vq(z)
+        vq_loss, quantized, perplexity, encoding_indices = self.vq(z)
         x_recon = self.decoder(quantized)
-        return vq_loss, x_recon, perplexity
+        return vq_loss, x_recon, perplexity, encoding_indices

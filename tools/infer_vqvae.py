@@ -4,7 +4,7 @@ import torch
 import os
 from tqdm import tqdm
 import torchvision
-from model.vqvae import get_model
+from model.vqvae_v2 import VQVAEv2
 from torch.utils.data.dataloader import DataLoader
 from dataset.naruto_dataset import NarutoDataset
 from torchvision.utils import make_grid
@@ -16,7 +16,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_dataset(config, split):
     if config['train_params']['dataset'] == 'naruto':
-        dataset = NarutoDataset(split=split)
+        dataset = NarutoDataset(split=split, image_size=config['model_params']['image_size'])
     else:
         raise ValueError("Unknown dataset")
     return dataset
@@ -40,17 +40,19 @@ def reconstruct(config, model, dataset, num_images=100):
     idxs = torch.randint(0, len(dataset) - 1, (num_images,))
     ims = torch.cat([dataset[idx][0][None, :] for idx in idxs]).float()
     ims = ims.to(device)
-    model_output = model(ims)
-    output = model_output['generated_image']
+    
+    # VQVAEv2 returns vq_loss, x_recon, perplexity, encoding_indices
+    _, output, _, _ = model(ims)
     
     # Dataset generates -1 to 1 we convert it to 0-1
-    ims = (ims + 1) / 2
+    ims = (ims * 0.5 + 0.5).clamp(0, 1)
+    generated_im = (output * 0.5 + 0.5).clamp(0, 1)
     
-    generated_im = (output + 1) / 2
     out = torch.hstack([ims, generated_im])
-    output = rearrange(out, 'b (c d) h w -> b (d) h (c w)', c=2, d=config['model_params']['in_channels'])
+    # The rearrange here seems to be intended for side-by-side but let's just use make_grid correctly
+    # out has shape (num_images, C, H, 2*W)
     
-    grid = make_grid(output.detach().cpu(), nrow=10)
+    grid = make_grid(out, nrow=10)
     
     wandb.log({"reconstructions": wandb.Image(grid)})
     
@@ -72,8 +74,8 @@ def save_encodings(config, model, data_loader):
     print('Saving Encodings for lstm')
     for im, _ in tqdm(data_loader):
         im = im.float().to(device)
-        model_output = model(im)
-        quant_indices = model_output['quantized_indices']
+        # VQVAEv2 returns vq_loss, x_recon, perplexity, encoding_indices
+        _, _, _, quant_indices = model(im)
         save_encodings = quant_indices if save_encodings is None else torch.cat([save_encodings, quant_indices], dim=0)
     
     encoding_path = os.path.join(config['train_params']['task_name'],
@@ -97,19 +99,30 @@ def inference(args):
     wandb.init(project="vqvae-naruto-inference", config=config)
     print(config)
     
-    model = get_model(config).to(device)
+    model = VQVAEv2(
+        num_hiddens=config['model_params']['num_hiddens'],
+        num_downsampling_layers=config['model_params']['num_downsampling_layers'],
+        num_upsampling_layers=config['model_params']['num_upsampling_layers'],
+        num_residual_layers=config['model_params']['num_residual_layers'],
+        num_residual_hiddens=config['model_params']['num_residual_hiddens'],
+        num_embeddings=config['model_params']['num_embeddings'],
+        embedding_dim=config['model_params']['embedding_dim'],
+        commitment_cost=config['model_params']['commitment_cost'],
+        decay=config['model_params']['decay']
+    ).to(device)
+    
     model.load_state_dict(torch.load(os.path.join(config['train_params']['task_name'],
-                                                  config['train_params']['ckpt_name']), map_location='cpu'))
-    model.to(device)
+                                                  config['train_params']['ckpt_name']), map_location=device))
     model.eval()
     
     train_dataset = get_dataset(config, 'train')
-    test_dataset = get_dataset(config, 'train') # Using train split for naruto as there is no test split.
     
     train_loader = DataLoader(train_dataset, batch_size=config['train_params']['batch_size'], shuffle=False, num_workers=4)
     
     with torch.no_grad():
-        reconstruct(config, model, test_dataset)
+        # Generate Reconstructions
+        reconstruct(config, model, train_dataset)
+        # Save Encoder Outputs for training lstm
         save_encodings(config, model, train_loader)
         
 
