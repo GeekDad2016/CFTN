@@ -5,7 +5,7 @@ import torch
 import pickle
 from tqdm import tqdm
 import torchvision
-from model.vqvae import get_model
+from model.vqvae_v2 import VQVAEv2
 from torchvision.utils import make_grid
 from tools.train_lstm import VQVAELSTM
 import wandb
@@ -34,17 +34,29 @@ def generate(args):
     wandb.init(project="vqvae-naruto-generation", config=config)
     print(config)
     
-    vqvae_model = get_model(config).to(device)
-    vqvae_model.to(device)
+    # Initialize VQVAEv2 correctly
+    vqvae_model = VQVAEv2(
+        num_hiddens=config['model_params']['num_hiddens'],
+        num_downsampling_layers=config['model_params']['num_downsampling_layers'],
+        num_upsampling_layers=config['model_params']['num_upsampling_layers'],
+        num_residual_layers=config['model_params']['num_residual_layers'],
+        num_residual_hiddens=config['model_params']['num_residual_hiddens'],
+        num_embeddings=config['model_params']['num_embeddings'],
+        embedding_dim=config['model_params']['embedding_dim'],
+        commitment_cost=config['model_params']['commitment_cost'],
+        decay=config['model_params']['decay']
+    ).to(device)
+    
     assert os.path.exists(os.path.join(config['train_params']['task_name'],
                                                   config['train_params']['ckpt_name'])), "Train the vqvae model first"
     vqvae_model.load_state_dict(torch.load(os.path.join(config['train_params']['task_name'],
                                                   config['train_params']['ckpt_name']), map_location=device))
     vqvae_model.eval()
     
+    # Initialize VQVAELSTM correctly
     model = VQVAELSTM(input_size=config['lstm_params']['embedding_dim'],
                       hidden_size=config['lstm_params']['hidden_size'],
-                      codebook_size=config['model_params']['codebook_size']).to(device)
+                      codebook_size=config['model_params']['num_embeddings']).to(device)
     model.to(device)
     assert os.path.exists(os.path.join(config['train_params']['task_name'],
                                                     'best_lstm.pth')), "Train the lstm first"
@@ -59,42 +71,61 @@ def generate(args):
     assert os.path.exists(encodings_path), "Generate encodings first"
     
     encodings = pickle.load(open(encodings_path, 'rb'))
-    encodings_length = encodings.reshape(encodings.size(0), -1).shape[-1]
+    # Calculate length from encodings. Shape is likely [N, H, W]
+    encodings_length = encodings.shape[1] * encodings.shape[2]
+    
     context_size = 32
-    num_samples = 100
+    num_samples = 64 # Match batch size for a nice grid
     print('Generating Samples')
     for _ in tqdm(range(num_samples)):
-        ctx = torch.ones((1)).to(device) * (config['model_params']['codebook_size'])
+        # Initialize with start token
+        ctx = torch.ones((1)).to(device) * (config['model_params']['num_embeddings'])
         
         for i in range(encodings_length):
             padded_ctx = ctx
             if len(ctx) < context_size:
+                # Pad context with pad token
                 padded_ctx = torch.nn.functional.pad(padded_ctx, (0, context_size - len(ctx)), "constant",
-                                                  config['model_params']['codebook_size']+1)
+                                                  config['model_params']['num_embeddings']+1)
+            elif len(ctx) > context_size:
+                # Take only the last 'context_size' tokens
+                padded_ctx = ctx[-context_size:]
                 
             out = model(padded_ctx[None, :].long().to(device))
             probs = torch.nn.functional.softmax(out, dim=-1)
             pred = torch.multinomial(probs[0], num_samples=1)
             ctx = torch.cat([ctx, pred])
+        # Skip the start token
         generated_quantized_indices.append(ctx[1:][None, :])
         
     generated_quantized_indices = torch.cat(generated_quantized_indices, dim=0)
-    h = int(generated_quantized_indices[0].size(-1)**0.5)
-    quantized_indices = generated_quantized_indices.reshape((generated_quantized_indices.size(0), h, h)).long()
-    quantized_indices = torch.nn.functional.one_hot(quantized_indices, config['model_params']['codebook_size'])
-    quantized_indices = quantized_indices.permute((0, 3, 1, 2))
-    output = vqvae_model.decode_from_codebook_indices(quantized_indices.float())
+    # Reconstruct shape (assuming square latent grid)
+    h_latent = int(encodings.shape[1])
+    w_latent = int(encodings.shape[2])
+    quantized_indices = generated_quantized_indices.reshape((num_samples, h_latent, w_latent)).long()
     
-    output = (output + 1) / 2
+    # Map indices to embeddings
+    # quantized_indices is (B, H, W)
+    # vqvae_model.vq.embedding.weight is (num_embeddings, embedding_dim)
     
-    grid = make_grid(output.detach().cpu(), nrow=10)
+    # Use embedding lookup
+    embeddings = vqvae_model.vq.embedding(quantized_indices) # (B, H, W, embedding_dim)
+    embeddings = embeddings.permute(0, 3, 1, 2).contiguous() # (B, embedding_dim, H, W)
+    
+    with torch.no_grad():
+        output = vqvae_model.decoder(embeddings)
+        output = (output * 0.5 + 0.5).clamp(0, 1)
+    
+    grid = make_grid(output.detach().cpu(), nrow=8)
     
     wandb.log({"generated_images": wandb.Image(grid)})
     
     img = torchvision.transforms.ToPILImage()(grid)
-    img.save(os.path.join(config['train_params']['task_name'],
-                          config['train_params']['output_train_dir'],
-                          'generation_results.png'))
+    results_path = os.path.join(config['train_params']['task_name'],
+                                config['train_params']['output_train_dir'],
+                                'generation_results.png')
+    img.save(results_path)
+    print(f"Saved generation results to {results_path}")
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Arguments for LSTM generation')

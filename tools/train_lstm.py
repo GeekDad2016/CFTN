@@ -43,7 +43,7 @@ class VQVAESeqDataset(Dataset):
     by running vqvae inference
     """
     def __init__(self, config):
-        self.codebook_size = config['model_params']['codebook_size']
+        self.codebook_size = config['model_params']['num_embeddings']
         
         # Codebook tokens will be 0 to codebook_size-1
         self.start_token = self.codebook_size
@@ -72,8 +72,8 @@ class VQVAESeqDataset(Dataset):
             enc = encodings[encoding_idx]
             encoding_length = enc.shape[-1]
             
-            # Make sure all encodings start with start token
-            enc = torch.cat([torch.ones((1)).to(device) * self.start_token, enc.to(device)])
+            # Make sure all encodings start with start token. Keep on CPU for DataLoader compatibility.
+            enc = torch.cat([torch.ones((1)) * self.start_token, enc.cpu()])
             
             # Create batches of context sized inputs(if possible) and target
             sents = [(enc[:i], enc[i]) if i < self.context_size else (enc[i - self.context_size:i], enc[i])
@@ -108,8 +108,15 @@ def train_lstm(args):
     
     model = VQVAELSTM(input_size=config['lstm_params']['embedding_dim'],
                       hidden_size=config['lstm_params']['hidden_size'],
-                      codebook_size=config['model_params']['codebook_size']).to(device)
+                      codebook_size=config['model_params']['num_embeddings']).to(device)
     model.to(device)
+    
+    # Load checkpoint if found
+    checkpoint_path = os.path.join(config['train_params']['task_name'], 'best_lstm.pth')
+    if os.path.exists(checkpoint_path):
+        print(f"Loading LSTM checkpoint from {checkpoint_path}")
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    
     model.train()
     
     num_epochs = config['lstm_params']['epochs']

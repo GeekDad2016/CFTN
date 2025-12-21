@@ -38,7 +38,7 @@ def reconstruct(config, model, dataset, num_images=100):
         os.mkdir(os.path.join(config['train_params']['task_name'], config['train_params']['output_train_dir']))
     
     idxs = torch.randint(0, len(dataset) - 1, (num_images,))
-    ims = torch.cat([dataset[idx][0][None, :] for idx in idxs]).float()
+    ims = torch.cat([dataset[idx.item()][0][None, :] for idx in idxs]).float()
     ims = ims.to(device)
     
     # VQVAEv2 returns vq_loss, x_recon, perplexity, encoding_indices
@@ -48,11 +48,10 @@ def reconstruct(config, model, dataset, num_images=100):
     ims = (ims * 0.5 + 0.5).clamp(0, 1)
     generated_im = (output * 0.5 + 0.5).clamp(0, 1)
     
-    out = torch.hstack([ims, generated_im])
-    # The rearrange here seems to be intended for side-by-side but let's just use make_grid correctly
-    # out has shape (num_images, C, H, 2*W)
+    # Concatenate side-by-side along the width dimension
+    out = torch.cat([ims, generated_im], dim=3)
     
-    grid = make_grid(out, nrow=10)
+    grid = make_grid(out, nrow=5) # 5 pairs per row
     
     wandb.log({"reconstructions": wandb.Image(grid)})
     

@@ -19,3 +19,8 @@ train_params:
   seed: 111
   output_train_dir: 'output'
   dataset: 'naruto'
+
+lstm_params:
+  embedding_dim: 256
+  hidden_size: 512
+  epochs: 100
