@@ -1,36 +1,19 @@
 model_params:
-  in_channels: 3
-  convbn_blocks: 5
-  conv_kernel_size: [4, 4, 4, 4, 4]
-  conv_kernel_strides: [2, 2, 2, 2, 2]
-  convbn_channels: [3, 64, 128, 256, 512, 512]
-  conv_activation_fn: 'leaky'
-  transpose_bn_blocks: 5
-  transposebn_channels: [512, 512, 256, 128, 64, 3]
-  transpose_kernel_size: [4, 4, 4, 4, 4]
-  transpose_kernel_strides: [2, 2, 2, 2, 2]
-  transpose_padding: [1, 1, 1, 1, 1]
-  transpose_activation_fn: 'leaky'
-  latent_dim: 512
-  codebook_size: 4096
+  image_size: 128
+  num_hiddens: 128
+  num_residual_layers: 2
+  num_residual_hiddens: 32
+  num_embeddings: 8192
+  embedding_dim: 256
+  commitment_cost: 0.25
+  decay: 0.99
 
 train_params:
-  task_name: 'vqvae_naruto'
-  batch_size: 32
-  epochs: 200
-  lr: 0.0002
-  crit: 'l1'
-  reconstruction_loss_weight : 1
-  codebook_loss_weight : 1
-  commitment_loss_weight : 1.0
-  ckpt_name: 'best_vqvae_naruto.pth'
+  task_name: 'vqvae_naruto_v2'
+  batch_size: 64
+  epochs: 100
+  lr: 0.0001
+  ckpt_name: 'best_vqvae_naruto_v2.pth'
   seed: 111
-  save_training_image: True
   output_train_dir: 'output'
   dataset: 'naruto'
-  overfit_on_batch: False
-
-lstm_params:
-  embedding_dim: 256
-  hidden_size: 512
-  epochs: 50

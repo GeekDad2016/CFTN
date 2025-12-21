@@ -4,10 +4,10 @@ from torchvision import transforms
 from PIL import Image
 
 class NarutoDataset(Dataset):
-    def __init__(self, split='train', im_size=128):
+    def __init__(self, split='train', image_size=128):
         self.dataset = load_dataset("lambdalabs/naruto-blip-captions", split=split)
         self.transform = transforms.Compose([
-            transforms.Resize((im_size, im_size)),
+            transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
