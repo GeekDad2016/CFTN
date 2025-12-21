@@ -174,6 +174,10 @@ def train_lstm(args):
         vqvae_model.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
     vqvae_model.eval()
 
+    num_epochs = config['lstm_params']['epochs']
+    optimizer = Adam(model.parameters(), lr=1E-3)
+    criterion = torch.nn.CrossEntropyLoss()
+
     # Load checkpoint if found
     start_epoch = 0
     checkpoint_path = os.path.join(config['train_params']['task_name'], 'best_lstm.pth')
@@ -182,16 +186,14 @@ def train_lstm(args):
         checkpoint = torch.load(checkpoint_path, map_location=device)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
         else:
             # Backwards compatibility for state-dict only checkpoints
             model.load_state_dict(checkpoint)
     
     model.train()
-    
-    num_epochs = config['lstm_params']['epochs']
-    optimizer = Adam(model.parameters(), lr=1E-3)
-    criterion = torch.nn.CrossEntropyLoss()
     
     for epoch in range(start_epoch, num_epochs):
         losses = []
@@ -216,6 +218,7 @@ def train_lstm(args):
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
         }, os.path.join(config['train_params']['task_name'], 'best_lstm.pth'))
     
 
