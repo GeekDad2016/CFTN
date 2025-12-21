@@ -43,6 +43,8 @@ def train(args):
 
     model = VQVAEv2(
         num_hiddens=config['model_params']['num_hiddens'],
+        num_downsampling_layers=config['model_params']['num_downsampling_layers'],
+        num_upsampling_layers=config['model_params']['num_upsampling_layers'],
         num_residual_layers=config['model_params']['num_residual_layers'],
         num_residual_hiddens=config['model_params']['num_residual_hiddens'],
         num_embeddings=config['model_params']['num_embeddings'],

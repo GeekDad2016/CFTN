@@ -64,12 +64,14 @@ class Decoder(nn.Module):
         self.layers.append(ResidualStack(num_hiddens, num_hiddens, num_residual_layers, num_residual_hiddens))
 
         # Upsampling layers
-        for _ in range(num_upsampling_layers):
-            self.layers.append(nn.ConvTranspose2d(num_hiddens, num_hiddens // 2, kernel_size=4, stride=2, padding=1))
-            self.layers.append(nn.ReLU(True))
-            num_hiddens = num_hiddens // 2
+        for i in range(num_upsampling_layers):
+            if i == num_upsampling_layers - 1:
+                self.layers.append(nn.ConvTranspose2d(num_hiddens, 3, kernel_size=4, stride=2, padding=1))
+            else:
+                self.layers.append(nn.ConvTranspose2d(num_hiddens, num_hiddens // 2, kernel_size=4, stride=2, padding=1))
+                self.layers.append(nn.ReLU(True))
+                num_hiddens = num_hiddens // 2
         
-        self.layers.append(nn.ConvTranspose2d(num_hiddens, 3, kernel_size=4, stride=2, padding=1))
         self.layers.append(nn.Tanh())
 
     def forward(self, x):
@@ -78,13 +80,13 @@ class Decoder(nn.Module):
         return x
 
 class VQVAEv2(nn.Module):
-    def __init__(self, num_hiddens, num_residual_layers, num_residual_hiddens, 
+    def __init__(self, num_hiddens, num_downsampling_layers, num_upsampling_layers, num_residual_layers, num_residual_hiddens, 
                  num_embeddings, embedding_dim, commitment_cost, decay):
         super(VQVAEv2, self).__init__()
         
-        self.encoder = Encoder(3, num_hiddens, 2, num_residual_layers, num_residual_hiddens, embedding_dim)
+        self.encoder = Encoder(3, num_hiddens, num_downsampling_layers, num_residual_layers, num_residual_hiddens, embedding_dim)
         self.vq = VectorQuantizerEMA(num_embeddings, embedding_dim, commitment_cost, decay)
-        self.decoder = Decoder(embedding_dim, num_hiddens, 2, num_residual_layers, num_residual_hiddens)
+        self.decoder = Decoder(embedding_dim, num_hiddens, num_upsampling_layers, num_residual_layers, num_residual_hiddens)
 
     def forward(self, x):
         z = self.encoder(x)

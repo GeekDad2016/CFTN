@@ -1,6 +1,8 @@
 model_params:
   image_size: 128
   num_hiddens: 128
+  num_downsampling_layers: 2
+  num_upsampling_layers: 2
   num_residual_layers: 2
   num_residual_hiddens: 32
   num_embeddings: 8192
