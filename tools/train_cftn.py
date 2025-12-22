@@ -117,6 +117,9 @@ def train(args):
     model = CFTN(config['cftn_params']).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['cftn_params']['lr'])
     
+    # Add Cosine Annealing Scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['cftn_params']['epochs'])
+    
     # 5. Load Checkpoint if found (Resume Logic)
     start_epoch = 0
     checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
@@ -127,6 +130,8 @@ def train(args):
             model.load_state_dict(checkpoint['model_state_dict'])
             if 'optimizer_state_dict' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'scheduler_state_dict' in checkpoint:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
         else:
             model.load_state_dict(checkpoint)
@@ -145,28 +150,35 @@ def train(args):
         epoch_losses = []
         epoch_accs = []
         
-        for imgs, captions in pbar:
+        # Running averages for TQDM
+        running_loss = 0.0
+        running_acc = 0.0
+        
+        for i, (imgs, captions) in enumerate(pbar):
             imgs = imgs.to(device)
+            B = imgs.size(0)
             
             # A. Get VQ-VAE Indices
             with torch.no_grad():
                 _, _, _, indices = vqvae(imgs)
-                indices = indices.view(imgs.size(0), -1) # [B, 1024]
+                indices = indices.view(B, -1) # [B, 1024]
             
             # B. Prepare Text
             text_tokens = tokenizer(captions, padding='max_length', truncation=True, max_length=config['cftn_params']['text_block_size'], return_tensors="pt").input_ids.to(device)
             
             # C. Masking Logic
-            # MaskGIT style: cosine distribution for masking ratio
-            # favors higher masking ratios
-            u = np.random.uniform(0, 1)
-            r = math.cos(u * math.pi / 2)
+            # Sample masking ratio per sample in the batch for diversity
+            u = np.random.uniform(0, 1, size=(B,))
+            r = np.cos(u * np.pi / 2)
+            r_tensor = torch.from_numpy(r).float().to(device).view(B, 1)
             
-            mask = torch.bernoulli(torch.full(indices.shape, r, device=device))
+            mask = torch.bernoulli(r_tensor.expand(indices.shape))
             
-            # Ensure at least one token is masked to avoid zero loss
-            if mask.sum() == 0:
-                mask[0, 0] = 1
+            # Ensure at least one token is masked per sample to avoid zero loss
+            mask_sum = mask.sum(dim=1)
+            for b in range(B):
+                if mask_sum[b] == 0:
+                    mask[b, np.random.randint(0, 1024)] = 1
             
             masked_indices = indices.clone()
             masked_indices[mask == 1] = model.mask_token_id
@@ -192,18 +204,47 @@ def train(args):
             epoch_losses.append(loss.item())
             epoch_accs.append(accuracy.item())
             
+            # Update running averages for display
+            running_loss = 0.9 * running_loss + 0.1 * loss.item() if i > 0 else loss.item()
+            running_acc = 0.9 * running_acc + 0.1 * accuracy.item() if i > 0 else accuracy.item()
+            
             # F. Step Logging
             if global_step % 10 == 0:
                 wandb.log({
                     "train/step_loss": loss.item(),
                     "train/step_accuracy": accuracy.item(),
-                    "train/mask_ratio": r,
+                    "train/mask_ratio_avg": r.mean().item(),
                     "train/lr": optimizer.param_groups[0]['lr'],
                     "global_step": global_step
                 })
             
-            pbar.set_description(f"Epoch {epoch} | Loss: {loss.item():.4f} | Acc: {accuracy.item():.4f}")
+            pbar.set_description(f"Epoch {epoch} | Loss: {running_loss:.4f} | Acc: {running_acc:.4f}")
             global_step += 1
+            
+        # Step the scheduler
+        scheduler.step()
+
+        mean_loss = np.mean(epoch_losses)
+        mean_acc = np.mean(epoch_accs)
+        wandb.log({
+            "train/epoch_loss": mean_loss,
+            "train/epoch_accuracy": mean_acc,
+            "epoch": epoch
+        })
+        
+        if epoch % 10 == 0:
+            sample = generate_samples(model, vqvae, tokenizer, test_prompt, num_samples=16, steps=config['cftn_params']['steps'], temp=config['cftn_params']['temperature'])
+            grid = make_grid(sample, nrow=4)
+            save_path = os.path.join(results_dir, f"epoch_{epoch}.png")
+            save_image(grid, save_path)
+            wandb.log({"val/cftn_sample": wandb.Image(save_path)})
+
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+        }, checkpoint_path)
             
         mean_loss = np.mean(epoch_losses)
         mean_acc = np.mean(epoch_accs)
