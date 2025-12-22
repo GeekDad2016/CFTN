@@ -21,11 +21,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class VQVAELSTM(nn.Module):
     r"""
-    Very Simple 2 layer LSTM with an fc layer on last steps hidden dimension
+    Simple 4 layer LSTM with an fc layer on last steps hidden dimension
     """
     def __init__(self, input_size, hidden_size, codebook_size):
         super(VQVAELSTM, self).__init__()
-        self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=2, batch_first=True)
+        self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=4, batch_first=True)
         self.fc = nn.Sequential(nn.Linear(hidden_size, hidden_size // 4),
                                 nn.ReLU(),
                                 nn.Linear(hidden_size // 4, codebook_size))
@@ -51,7 +51,7 @@ class VQVAESeqDataset(Dataset):
         self.start_token = self.codebook_size
         self.pad_token = self.codebook_size+1
         # Fix context size
-        self.context_size = 32
+        self.context_size = 128
         self.sents = self.load_sents(config)
     
     def load_sents(self, config):

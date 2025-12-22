@@ -74,7 +74,7 @@ def generate(args):
     # Calculate length from encodings. Shape is likely [N, H, W]
     encodings_length = encodings.shape[1] * encodings.shape[2]
     
-    context_size = 32
+    context_size = 128
     num_samples = 64 # Match batch size for a nice grid
     print('Generating Samples')
     for _ in tqdm(range(num_samples)):
@@ -87,12 +87,12 @@ def generate(args):
                 # Pad context with pad token
                 padded_ctx = torch.nn.functional.pad(padded_ctx, (0, context_size - len(ctx)), "constant",
                                                   config['model_params']['num_embeddings']+1)
-            elif len(ctx) > context_size:
+            else:
                 # Take only the last 'context_size' tokens
                 padded_ctx = ctx[-context_size:]
                 
             out = model(padded_ctx[None, :].long().to(device))
-            probs = torch.nn.functional.softmax(out, dim=-1)
+            probs = torch.nn.functional.softmax(out / 0.8, dim=-1)
             pred = torch.multinomial(probs[0], num_samples=1)
             ctx = torch.cat([ctx, pred])
         # Skip the start token
