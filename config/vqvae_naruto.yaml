@@ -21,6 +21,29 @@ train_params:
   dataset: 'naruto'
 
 lstm_params:
+
   embedding_dim: 256
+
   hidden_size: 512
+
   epochs: 100
+
+
+
+transformer_params:
+
+  n_layer: 8
+
+  n_head: 8
+
+  n_embd: 512
+
+  embd_pdrop: 0.1
+
+  resid_pdrop: 0.1
+
+  attn_pdrop: 0.1
+
+  lr: 0.0003
+
+  epochs: 200
