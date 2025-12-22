@@ -156,6 +156,6 @@ def train_transformer(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='config/vqvae_naruto.yaml')
+    parser.add_argument('--config', dest='config_path', default='config/vqvae_naruto.yaml')
     args = parser.parse_args()
     train_transformer(args)

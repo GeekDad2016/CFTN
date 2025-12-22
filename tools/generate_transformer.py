@@ -14,7 +14,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 @torch.no_grad()
 def generate(args):
-    with open(args.config, 'r') as file:
+    with open(args.config_path, 'r') as file:
         config = yaml.safe_load(file)
     
     wandb.init(project="vqvae-naruto-transformer-gen", config=config)
@@ -83,7 +83,7 @@ def generate(args):
 if __name__ == '__main__':
     import math
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='config/vqvae_naruto.yaml')
+    parser.add_argument('--config', dest='config_path', default='config/vqvae_naruto.yaml')
     parser.add_argument('--num_samples', type=int, default=16)
     parser.add_argument('--temp', type=float, default=0.8)
     args = parser.parse_args()
