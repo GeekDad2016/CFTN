@@ -60,11 +60,11 @@ class CFTN(nn.Module):
         
         # Image Tokenizer
         self.tok_emb = nn.Embedding(config['vocab_size'] + 1, config['n_embd']) # +1 for [MASK]
-        self.pos_emb = nn.Parameter(torch.zeros(1, config['block_size'], config['n_embd']))
+        self.pos_emb = nn.Parameter(torch.randn(1, config['block_size'], config['n_embd']) * 0.02)
         
-        # Text Tower (Simple Embedding + Projection for now)
+        # Text Tower
         self.text_tok_emb = nn.Embedding(config['text_vocab_size'], config['n_embd'])
-        self.text_pos_emb = nn.Parameter(torch.zeros(1, config['text_block_size'], config['n_embd']))
+        self.text_pos_emb = nn.Parameter(torch.randn(1, config['text_block_size'], config['n_embd']) * 0.02)
         
         self.blocks = nn.ModuleList([CFTNBlock(config) for _ in range(config['n_layer'])])
         self.ln_f = nn.LayerNorm(config['n_embd'])
