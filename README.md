@@ -1,84 +1,70 @@
-VQVAE Implementation in pytorch with generation using LSTM
-========
+# Naruto Image Generation: VQ-VAE v2 + CFTN (MaskGIT)
 
-This repository implements [VQVAE](https://arxiv.org/abs/1711.00937) for mnist and colored version of mnist and follows up with a simple LSTM for generating numbers.
+This repository implements a state-of-the-art image generation pipeline using a **VQ-VAE v2** for visual tokenization and a **CFTN (Conditional Flow Transformer Network)** for text-to-image generation.
 
-## VQVAE Explanation and Implementation Video
-<a href="https://www.youtube.com/watch?v=1ZHzAOutcnw">
-   <img alt="VQVAE Video" src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/a411d732-8c99-41fb-b39c-dd2c3fbfa448"
-   width="300">
-</a>
+## 🚀 Overview
 
+The project has evolved from simple sequence modeling (LSTM) to a bidirectional, non-autoregressive transformer approach inspired by **MaskGIT**.
 
-# Quickstart
-* Create a new conda environment with python 3.8 then run below commands
-* ```git clone https://github.com/explainingai-code/VQVAE-Pytorch.git```
-* ```cd VQVAE-Pytorch```
-* ```pip install -r requirements.txt```
-* For running a simple VQVAE with minimal code to understand the basics ```python run_simple_vqvae.py```
-* For playing around with VQVAE and training/inferencing the LSTM use the below commands passing the desired configuration file as the config argument 
-* ```python -m tools.train_vqvae``` for training vqvae
-* ```python -m tools.infer_vqvae``` for generating reconstructions and encoder outputs for LSTM training
-* ```python -m tools.train_lstm``` for training minimal LSTM 
-* ```python -m tools.generate_images``` for using the trained LSTM to generate some numbers
+### Key Components:
+1.  **VQ-VAE v2**: A robust visual tokenizer that maps $128 \times 128$ images into a discrete $32 \times 32$ grid of latent codes.
+2.  **CFTN (MaskGIT style)**: A Bidirectional Transformer with Cross-Attention. It doesn't generate images one-by-one; instead, it learns to "fill in the blanks" of a masked image grid, conditioned on text prompts.
 
-## Configurations
-* ```config/vqvae_mnist.yaml``` - VQVAE for training on black and white mnist images
-* ```config/vqvae_colored_mnist.yaml``` - VQVAE with more embedding vectors for training colored mnist images 
+---
 
-## Data preparation
-For setting up the dataset:
-Follow - https://github.com/explainingai-code/Pytorch-VAE#data-preparation
+## 🛠 Architecture & Mechanism
 
-Verify the data directory has the following structure:
-```
-VQVAE-Pytorch/data/train/images/{0/1/.../9}
-	*.png
-VQVAE-Pytorch/data/test/images/{0/1/.../9}
-	*.png
+### 1. VQ-VAE v2 (The Tokenizer)
+-   **Encoder/Decoder**: Utilizes deep Residual Blocks to preserve high-frequency details.
+-   **Quantizer**: `VectorQuantizerEMA` for stable training and high codebook utilization (4096 embeddings).
+-   **Objective**: Minimize Reconstruction Loss (MSE/L1) + Commitment Loss.
+
+### 2. CFTN (The Generator)
+-   **Training Objective**: **Masked Image Modeling**. During training, we randomly mask a percentage of image tokens (following a cosine schedule) and task the transformer with predicting the original tokens based on the surrounding context and text descriptions.
+-   **Text Conditioning**: Uses a BERT tokenizer and cross-attention layers to inject text features into every block of the transformer.
+-   **Inference (Parallel Decoding)**: Unlike LSTMs/GPTs that take 1024 steps to generate an image, CFTN uses **Iterative Parallel Decoding**. It can generate high-quality images in just **8-12 steps** by filling in the most confident tokens first.
+
+---
+
+## 🏃 Usage
+
+### 1. Setup
+```bash
+pip install -r requirements.txt
+wandb login
 ```
 
-## Output 
-Outputs will be saved according to the configuration present in yaml files.
-
-For every run a folder of ```task_name``` key in config will be created and ```output_train_dir``` will be created inside it.
-
-During training of VQVAE the following output will be saved 
-* Best Model checkpoints(VQVAE and LSTM) in ```task_name``` directory
-
-During inference the following output will be saved
-* Reconstructions for sample of test set in ```task_name/output_train_dir/reconstruction.png``` 
-* Encoder outputs on train set for LSTM training in ```task_name/output_train_dir/mnist_encodings.pkl```
-* LSTM generation output in ```task_name/output_train_dir/generation_results.png```
-
-
-## Sample Output for VQVAE
-
-Running `run_simple_vqvae` should be very quick (as its very simple model) and give you below reconstructions (input in black black background and reconstruction in white background)
-
-<img src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/607fb5a8-b880-4af5-8ce0-5d7127aa66a7" width="400">
-
-Running default config VQVAE for mnist should give you below reconstructions for both versions
-
-<img src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/939f8f22-0145-467f-8cd6-4b6c6e6f315f" width="400">
-<img src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/0e28286a-bc4c-44e3-a385-84d1ae99492c" width="400">
-
-Sample Generation Output after just 10 epochs
-Training the vqvae and lstm longer and more parameters(codebook size, codebook dimension, channels , lstm hidden dimension e.t.c) will give better results 
-
-<img src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/688a6631-df34-4fde-9508-a05ae3c2ae91" width="300">
-<img src="https://github.com/explainingai-code/VQVAE-Pytorch/assets/144267687/187fa630-a7ef-4f0b-aef7-5c6b53019b38" width="300">
-
-## Citations
-```
-@misc{oord2018neural,
-      title={Neural Discrete Representation Learning}, 
-      author={Aaron van den Oord and Oriol Vinyals and Koray Kavukcuoglu},
-      year={2018},
-      eprint={1711.00937},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
-}
+### 2. Step 1: Train VQ-VAE
+First, train the model to understand the visual "vocabulary" of Naruto images.
+```bash
+python -m tools.train_vqvae --config config/vqvae_naruto.yaml
 ```
 
+### 3. Step 2: Generate Encodings
+Once VQ-VAE is trained, convert the entire image dataset into discrete tokens.
+```bash
+python -m tools.infer_vqvae --config config/vqvae_naruto.yaml
+```
 
+### 4. Step 3: Train CFTN (MaskGIT)
+Train the transformer to predict masked patches based on text captions.
+```bash
+python -m tools.train_cftn
+```
+
+### 5. Step 4: Generate New Images
+Generate images from text prompts using the fast parallel decoding mechanism.
+```bash
+python -m tools.generate_cftn --prompt "Naruto in the hidden leaf village, high quality digital art" --steps 12 --num_samples 4
+```
+
+---
+
+## 📊 Monitoring
+All training and generation progress is logged to **Weights & Biases (WandB)**.
+-   **VQ-VAE**: Tracks reconstruction grids and perplexity.
+-   **CFTN**: Tracks masking loss and provides "in-painting" samples during training.
+
+## 💾 Model Checkpoints
+Checkpoints are automatically saved in the `task_name` directory specified in your config. 
+-   The scripts support **automatic resuming**: if a training run is interrupted, simply run the command again to pick up from the last saved epoch.
