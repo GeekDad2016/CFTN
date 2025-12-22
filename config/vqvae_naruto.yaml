@@ -12,7 +12,7 @@ model_params:
 
 train_params:
   task_name: 'vqvae_naruto_v2'
-  batch_size: 64
+  batch_size: 16
   epochs: 1000
   lr: 0.0001
   ckpt_name: 'best_vqvae_naruto_v2.pth'
@@ -21,44 +21,30 @@ train_params:
   dataset: 'naruto'
 
 lstm_params:
-
   embedding_dim: 256
-
   hidden_size: 512
-
   epochs: 100
 
-
-
 transformer_params:
-
   n_layer: 8
-
   n_head: 8
-
   n_embd: 512
-
   embd_pdrop: 0.1
-
   resid_pdrop: 0.1
-
   attn_pdrop: 0.1
-
   lr: 0.0003
-
   epochs: 200
-
   temperature: 0.8
 
 cftn_params:
   n_layer: 12
-  n_head: 8
-  n_embd: 768
+  n_head: 8s
+  n_embd: 256
   embd_pdrop: 0.1
   resid_pdrop: 0.1
   attn_pdrop: 0.1
   lr: 0.0001
-  epochs: 500
+  epochs: 10000
   temperature: 1.0
   text_block_size: 128
   steps: 12
