@@ -18,6 +18,15 @@ def generate(args):
         config = yaml.safe_load(file)
     
     wandb.init(project="vqvae-naruto-transformer-gen", config=config)
+
+    ######## Set the desired seed value #######
+    seed = args.seed if args.seed is not None else config['train_params'].get('seed', 111)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if device.type == 'cuda':
+        torch.cuda.manual_seed_all(seed)
+    #######################################
     
     # Calculate sizes
     encodings_path = os.path.join(config['train_params']['task_name'],
@@ -86,5 +95,6 @@ if __name__ == '__main__':
     parser.add_argument('--config', dest='config_path', default='config/vqvae_naruto.yaml')
     parser.add_argument('--num_samples', type=int, default=16)
     parser.add_argument('--temp', type=float, default=0.8)
+    parser.add_argument('--seed', type=int, default=None)
     args = parser.parse_args()
     generate(args)

@@ -57,6 +57,7 @@ def generate_samples(model, vqvae_model, config, latent_shape, epoch):
     num_embeddings = config['model_params']['num_embeddings']
     num_samples = 16
     block_size = latent_shape[0] * latent_shape[1]
+    temp = config['transformer_params'].get('temperature', 0.8)
     
     # Start with start tokens
     x = torch.ones((num_samples, 1), device=device).long() * num_embeddings
@@ -64,7 +65,7 @@ def generate_samples(model, vqvae_model, config, latent_shape, epoch):
     for _ in range(block_size):
         logits = model(x[:, -config['transformer_params']['block_size']:])
         # Take logits of the last position
-        logits = logits[:, -1, :] / 0.8 # Temperature
+        logits = logits[:, -1, :] / temp # Temperature
         probs = torch.softmax(logits, dim=-1)
         ix = torch.multinomial(probs, num_samples=1)
         x = torch.cat((x, ix), dim=1)
@@ -89,6 +90,15 @@ def train_transformer(args):
     
     wandb.init(project="vqvae-naruto-transformer", config=config)
     
+    ######## Set the desired seed value #######
+    seed = config['train_params'].get('seed', 111)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if device.type == 'cuda':
+        torch.cuda.manual_seed_all(seed)
+    #######################################
+
     dataset = VQVAETransformerDataset(config)
     loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     

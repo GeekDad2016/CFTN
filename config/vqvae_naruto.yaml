@@ -47,3 +47,5 @@ transformer_params:
   lr: 0.0003
 
   epochs: 200
+
+  temperature: 0.8
