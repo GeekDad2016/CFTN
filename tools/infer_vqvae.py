@@ -80,7 +80,8 @@ def save_encodings(config, model, data_loader):
     encoding_path = os.path.join(config['train_params']['task_name'],
                                  config['train_params']['output_train_dir'],
                                  'encodings.pkl')
-    pickle.dump(save_encodings, open(encoding_path, 'wb'))
+    # Use torch.save instead of pickle for better compatibility with map_location
+    torch.save(save_encodings.cpu(), encoding_path)
     print('Done saving encoder outputs for lstm for training')
     
     artifact = wandb.Artifact('encodings', type='dataset')
