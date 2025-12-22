@@ -36,28 +36,41 @@ def generate_samples(model, vqvae, tokenizer, prompt, num_samples=16, steps=12, 
     
     # Start with all masked
     cur_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
+    cur_mask = torch.ones((num_samples, 1024), dtype=torch.bool, device=device)
     
     # 2. Iterative Parallel Decoding (MaskGIT logic)
     for i in range(steps):
         # Calculate how many tokens to mask (Cosine Schedule)
+        # ratio is how many tokens should be MASKED at the end of this step
         ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
-        num_to_keep = max(1, int(ratio * 1024))
+        num_to_mask = max(0, int((1.0 - ratio) * 1024))
         
         logits = model(cur_ids, text_tokens)
-        probs = F.softmax(logits, dim=-1)
+        probs = F.softmax(logits / max(temp, 1e-6), dim=-1)
         
-        # Original MaskGIT uses Gumbel noise to avoid solid color collapse
+        # Sample predictions using Gumbel-max trick
         gumbel_noise = -torch.log(-torch.log(torch.rand_like(probs) + 1e-10) + 1e-10)
-        confidences, predictions = torch.max(probs + gumbel_noise * temp, dim=-1)
+        predictions = torch.argmax(logits / max(temp, 1e-6) + gumbel_noise, dim=-1)
         
-        # Identify the most confident predictions
-        new_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
+        # Confidence is the probability of the predicted token
+        confidences = torch.gather(probs, -1, predictions.unsqueeze(-1)).squeeze(-1)
+        
+        # If a token was already unmasked, we give it high confidence to keep it
+        confidences[~cur_mask] = 2.0 
+        
+        # Identify which tokens to mask for the next iteration
+        # We want to keep the (1024 - num_to_mask) most confident tokens
+        new_mask = torch.ones_like(cur_mask)
         for b in range(num_samples):
-            _, topk_indices = torch.topk(confidences[b], k=num_to_keep)
-            new_ids[b, topk_indices] = predictions[b, topk_indices]
-        cur_ids = new_ids
+            if num_to_mask < 1024:
+                _, topk_indices = torch.topk(confidences[b], k=1024 - num_to_mask)
+                new_mask[b, topk_indices] = False
+        
+        cur_mask = new_mask
+        cur_ids = predictions.clone()
+        cur_ids[cur_mask] = model.mask_token_id
 
-    # 3. Final Safety Check
+    # 3. Final Safety Check - Fill all remaining masks
     if (cur_ids == model.mask_token_id).any():
         logits = model(cur_ids, text_tokens)
         predictions = torch.argmax(logits, dim=-1)
@@ -144,9 +157,16 @@ def train(args):
             text_tokens = tokenizer(captions, padding='max_length', truncation=True, max_length=config['cftn_params']['text_block_size'], return_tensors="pt").input_ids.to(device)
             
             # C. Masking Logic
-            # MaskGIT style: random ratio between 0.1 and 1.0
-            r = np.random.uniform(0.1, 1.0)
+            # MaskGIT style: cosine distribution for masking ratio
+            # favors higher masking ratios
+            u = np.random.uniform(0, 1)
+            r = math.cos(u * math.pi / 2)
+            
             mask = torch.bernoulli(torch.full(indices.shape, r, device=device))
+            
+            # Ensure at least one token is masked to avoid zero loss
+            if mask.sum() == 0:
+                mask[0, 0] = 1
             
             masked_indices = indices.clone()
             masked_indices[mask == 1] = model.mask_token_id
