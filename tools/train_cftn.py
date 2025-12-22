@@ -1,0 +1,137 @@
+import os
+import yaml
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import AutoTokenizer
+from dataset.naruto_dataset import NarutoDataset
+from model.vqvae_v2 import VQVAEv2
+from model.cftn import CFTN
+import wandb
+import numpy as np
+from torchvision.utils import make_grid, save_image
+import math
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+@torch.no_grad()
+def generate_samples(model, vqvae, tokenizer, prompt, steps=8):
+    model.eval()
+    vqvae.eval()
+    
+    # 1. Prepare Inputs
+    text_tokens = tokenizer([prompt], padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
+    cur_ids = torch.full((1, 1024), model.mask_token_id).long().to(device)
+    
+    # 2. Iterative Parallel Decoding
+    for i in range(steps):
+        # Calculate how many tokens to mask (Cosine Schedule)
+        ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
+        num_to_keep = int(ratio * 1024)
+        
+        logits = model(cur_ids, text_tokens)
+        probs = F.softmax(logits, dim=-1)
+        
+        confidences, predictions = torch.max(probs, dim=-1)
+        
+        # Keep the most confident tokens, mask the rest
+        _, topk_indices = torch.topk(confidences.view(-1), k=num_to_keep)
+        
+        new_ids = torch.full((1, 1024), model.mask_token_id).long().to(device)
+        new_ids.view(-1)[topk_indices] = predictions.view(-1)[topk_indices]
+        cur_ids = new_ids
+
+    # 3. Decode
+    indices = cur_ids.view(1, 32, 32)
+    embeddings = vqvae.vq.embedding(indices).permute(0, 3, 1, 2)
+    output = vqvae.decoder(embeddings)
+    output = (output * 0.5 + 0.5).clamp(0, 1)
+    
+    model.train()
+    return output
+
+def train():
+    # 1. Load Config
+    with open('config/vqvae_naruto.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # 2. Setup Tokenizers & Dataset
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    dataset = NarutoDataset(image_size=config['model_params']['image_size'])
+    loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
+    
+    # 3. Load VQ-VAE (Pre-trained)
+    vqvae = VQVAEv2(**config['model_params']).to(device)
+    vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
+    if os.path.exists(vqvae_ckpt):
+        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
+    vqvae.eval()
+
+    # 4. Setup CFTN
+    config['transformer_params'].update({
+        'block_size': 1024, # 32x32
+        'vocab_size': config['model_params']['num_embeddings'],
+        'text_vocab_size': tokenizer.vocab_size,
+        'text_block_size': 128
+    })
+    model = CFTN(config['transformer_params']).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config['transformer_params']['lr'])
+    
+    wandb.init(project="naruto-cftn", config=config)
+
+    test_prompt = "A high quality digital art of Naruto"
+    
+    results_dir = os.path.join(config['train_params']['task_name'], "cftn_results")
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+
+    for epoch in range(config['transformer_params']['epochs']):
+        pbar = tqdm(loader)
+        losses = []
+        for imgs, captions in pbar:
+            imgs = imgs.to(device)
+            
+            # A. Get Image Tokens from VQ-VAE
+            with torch.no_grad():
+                _, _, _, indices = vqvae(imgs)
+                indices = indices.view(imgs.size(0), -1) # [B, 1024]
+            
+            # B. Get Text Tokens
+            text_tokens = tokenizer(captions, padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
+            
+            # C. Masking Logic (MaskGIT)
+            r = np.random.uniform(0.1, 1.0)
+            mask = torch.bernoulli(torch.full(indices.shape, r)).to(device)
+            
+            masked_indices = indices.clone()
+            masked_indices[mask == 1] = model.mask_token_id
+            
+            # D. Forward and Loss
+            logits = model(masked_indices, text_tokens)
+            
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), indices.view(-1), reduction='none')
+            loss = (loss * mask.view(-1)).sum() / (mask.sum() + 1e-8)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            losses.append(loss.item())
+            pbar.set_description(f"Epoch {epoch} Loss: {loss.item():.4f}")
+            
+        mean_loss = np.mean(losses)
+        wandb.log({"train/loss": mean_loss, "epoch": epoch})
+        
+        # E. Validation generation
+        if epoch % 10 == 0:
+            sample = generate_samples(model, vqvae, tokenizer, test_prompt)
+            save_path = os.path.join(results_dir, f"epoch_{epoch}.png")
+            save_image(sample, save_path)
+            wandb.log({"val/sample": wandb.Image(save_path)})
+
+        torch.save(model.state_dict(), os.path.join(config['train_params']['task_name'], "best_cftn.pth"))
+
+if __name__ == "__main__":
+    train()

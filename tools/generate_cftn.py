@@ -1,0 +1,83 @@
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer
+from model.cftn import CFTN
+from model.vqvae_v2 import VQVAEv2
+import yaml
+from torchvision.utils import save_image, make_grid
+import math
+import os
+import argparse
+import wandb
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+@torch.no_grad()
+def generate(prompt, steps=8, num_samples=1):
+    with open('config/vqvae_naruto.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    
+    wandb.init(project="naruto-cftn-gen", config={"prompt": prompt, "steps": steps, "num_samples": num_samples})
+    
+    # Load Models
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    
+    config['transformer_params'].update({
+        'block_size': 1024, 'vocab_size': config['model_params']['num_embeddings'],
+        'text_vocab_size': tokenizer.vocab_size, 'text_block_size': 128
+    })
+    
+    model = CFTN(config['transformer_params']).to(device)
+    model_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    
+    vqvae = VQVAEv2(**config['model_params']).to(device)
+    vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
+    if os.path.exists(vqvae_ckpt):
+        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
+    vqvae.eval()
+    
+    # 1. Prepare Inputs
+    text_tokens = tokenizer([prompt] * num_samples, padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
+    cur_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
+    
+    # 2. Iterative Parallel Decoding
+    for i in range(steps):
+        # Calculate how many tokens to mask (Cosine Schedule)
+        ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
+        num_to_keep = int(ratio * 1024)
+        
+        logits = model(cur_ids, text_tokens)
+        probs = F.softmax(logits, dim=-1)
+        
+        confidences, predictions = torch.max(probs, dim=-1)
+        
+        # Keep the most confident tokens, mask the rest
+        # We need to do this per sample in the batch
+        new_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
+        for b in range(num_samples):
+            _, topk_indices = torch.topk(confidences[b], k=num_to_keep)
+            new_ids[b, topk_indices] = predictions[b, topk_indices]
+        cur_ids = new_ids
+
+    # 3. Decode
+    indices = cur_ids.view(num_samples, 32, 32)
+    embeddings = vqvae.vq.embedding(indices).permute(0, 3, 1, 2)
+    output = vqvae.decoder(embeddings)
+    output = (output * 0.5 + 0.5).clamp(0, 1)
+    
+    grid = make_grid(output, nrow=int(math.sqrt(num_samples)))
+    save_path = "cftn_result.png"
+    save_image(grid, save_path)
+    wandb.log({"generated_images": wandb.Image(save_path)})
+    print(f"Image saved to {save_path}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prompt", type=str, default="A high quality digital art of Naruto")
+    parser.add_argument("--steps", type=int, default=12)
+    parser.add_argument("--num_samples", type=int, default=4)
+    args = parser.parse_args()
+    generate(args.prompt, args.steps, args.num_samples)
