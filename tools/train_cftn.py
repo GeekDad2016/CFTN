@@ -99,6 +99,22 @@ def train():
     model = CFTN(config['transformer_params']).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['transformer_params']['lr'])
     
+    # 5. Load Checkpoint if found (Resume Logic)
+    start_epoch = 0
+    checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
+    if os.path.exists(checkpoint_path):
+        print(f"Loading CFTN checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+        else:
+            # Compatibility for weights-only checkpoints
+            model.load_state_dict(checkpoint)
+            print("Warning: Loaded weights only, optimizer state and epoch count reset.")
+
     wandb.init(project="vqvae-naruto-cftn", config=config)
 
     test_prompt = "Naruto standing in the forest, high quality digital art"
@@ -107,7 +123,7 @@ def train():
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
-    for epoch in range(config['transformer_params']['epochs']):
+    for epoch in range(start_epoch, config['transformer_params']['epochs']):
         pbar = tqdm(loader)
         epoch_losses = []
         for imgs, captions in pbar:
@@ -152,8 +168,12 @@ def train():
             save_image(grid, save_path)
             wandb.log({"val/cftn_sample": wandb.Image(save_path)})
 
-        checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
-        torch.save(model.state_dict(), checkpoint_path)
+        # Save comprehensive checkpoint
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, checkpoint_path)
 
 if __name__ == "__main__":
     train()
