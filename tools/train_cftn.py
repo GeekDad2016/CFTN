@@ -16,8 +16,14 @@ import math
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def get_vqvae(config):
+    # Filter out image_size which is used for dataset but not VQVAE init
+    vqvae_params = {k: v for k, v in config['model_params'].items() if k != 'image_size'}
+    model = VQVAEv2(**vqvae_params).to(device)
+    return model
+
 @torch.no_grad()
-def generate_samples(model, vqvae, tokenizer, prompt, steps=8):
+def generate_samples(model, vqvae, tokenizer, prompt, steps=12):
     model.eval()
     vqvae.eval()
     
@@ -25,7 +31,7 @@ def generate_samples(model, vqvae, tokenizer, prompt, steps=8):
     text_tokens = tokenizer([prompt], padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
     cur_ids = torch.full((1, 1024), model.mask_token_id).long().to(device)
     
-    # 2. Iterative Parallel Decoding
+    # 2. Iterative Parallel Decoding (MaskGIT logic)
     for i in range(steps):
         # Calculate how many tokens to mask (Cosine Schedule)
         ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
@@ -63,15 +69,16 @@ def train():
     loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     
     # 3. Load VQ-VAE (Pre-trained)
-    vqvae = VQVAEv2(**config['model_params']).to(device)
+    vqvae = get_vqvae(config)
     vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
     if os.path.exists(vqvae_ckpt):
+        print(f"Loading VQ-VAE checkpoint from {vqvae_ckpt}")
         vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
     vqvae.eval()
 
     # 4. Setup CFTN
     config['transformer_params'].update({
-        'block_size': 1024, # 32x32
+        'block_size': 1024, 
         'vocab_size': config['model_params']['num_embeddings'],
         'text_vocab_size': tokenizer.vocab_size,
         'text_block_size': 128
@@ -79,9 +86,9 @@ def train():
     model = CFTN(config['transformer_params']).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['transformer_params']['lr'])
     
-    wandb.init(project="naruto-cftn", config=config)
+    wandb.init(project="vqvae-naruto-cftn", config=config)
 
-    test_prompt = "A high quality digital art of Naruto"
+    test_prompt = "Naruto standing in the forest, high quality digital art"
     
     results_dir = os.path.join(config['train_params']['task_name'], "cftn_results")
     if not os.path.exists(results_dir):
@@ -89,7 +96,7 @@ def train():
 
     for epoch in range(config['transformer_params']['epochs']):
         pbar = tqdm(loader)
-        losses = []
+        epoch_losses = []
         for imgs, captions in pbar:
             imgs = imgs.to(device)
             
@@ -103,7 +110,7 @@ def train():
             
             # C. Masking Logic (MaskGIT)
             r = np.random.uniform(0.1, 1.0)
-            mask = torch.bernoulli(torch.full(indices.shape, r)).to(device)
+            mask = torch.bernoulli(torch.full(indices.shape, r, device=device))
             
             masked_indices = indices.clone()
             masked_indices[mask == 1] = model.mask_token_id
@@ -118,20 +125,21 @@ def train():
             loss.backward()
             optimizer.step()
             
-            losses.append(loss.item())
+            epoch_losses.append(loss.item())
             pbar.set_description(f"Epoch {epoch} Loss: {loss.item():.4f}")
             
-        mean_loss = np.mean(losses)
-        wandb.log({"train/loss": mean_loss, "epoch": epoch})
+        mean_loss = np.mean(epoch_losses)
+        wandb.log({"train/cftn_loss": mean_loss, "epoch": epoch})
         
         # E. Validation generation
         if epoch % 10 == 0:
             sample = generate_samples(model, vqvae, tokenizer, test_prompt)
             save_path = os.path.join(results_dir, f"epoch_{epoch}.png")
             save_image(sample, save_path)
-            wandb.log({"val/sample": wandb.Image(save_path)})
+            wandb.log({"val/cftn_sample": wandb.Image(save_path)})
 
-        torch.save(model.state_dict(), os.path.join(config['train_params']['task_name'], "best_cftn.pth"))
+        checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
+        torch.save(model.state_dict(), checkpoint_path)
 
 if __name__ == "__main__":
     train()
