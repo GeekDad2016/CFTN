@@ -24,8 +24,8 @@ class VQVAETransformerDataset(Dataset):
                                      'encodings.pkl')
         assert os.path.exists(encoding_path), "No encodings found. Run infer_vqvae.py first."
         
-        with open(encoding_path, 'rb') as f:
-            self.encodings = pickle.load(f)
+        # Load using torch.load with map_location='cpu' to handle GPU tensors in pickle
+        self.encodings = torch.load(encoding_path, map_location='cpu')
         
         self.num_embeddings = config['model_params']['num_embeddings']
         self.latent_shape = (self.encodings.shape[1], self.encodings.shape[2])

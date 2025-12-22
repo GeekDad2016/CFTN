@@ -61,7 +61,9 @@ class VQVAESeqDataset(Dataset):
         assert os.path.exists(encoding_path), ("No encodings generated for lstm. "
                                                "Run save_encodings method in inference script")
         
-        encodings = pickle.load(open(encoding_path, 'rb'))
+        # Load using torch.load with map_location='cpu' to handle GPU tensors in pickle
+        encodings = torch.load(encoding_path, map_location='cpu')
+        
         # Store latent shape for generation
         self.latent_shape = (encodings.shape[1], encodings.shape[2])
         
