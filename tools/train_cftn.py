@@ -126,19 +126,25 @@ def train(args):
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
+    global_step = 0
     for epoch in range(start_epoch, config['cftn_params']['epochs']):
         pbar = tqdm(loader)
         epoch_losses = []
+        epoch_accs = []
+        
         for imgs, captions in pbar:
             imgs = imgs.to(device)
             
+            # A. Get VQ-VAE Indices
             with torch.no_grad():
                 _, _, _, indices = vqvae(imgs)
                 indices = indices.view(imgs.size(0), -1) # [B, 1024]
             
+            # B. Prepare Text
             text_tokens = tokenizer(captions, padding='max_length', truncation=True, max_length=config['cftn_params']['text_block_size'], return_tensors="pt").input_ids.to(device)
             
             # C. Masking Logic
+            # MaskGIT style: random ratio between 0.1 and 1.0
             r = np.random.uniform(0.1, 1.0)
             mask = torch.bernoulli(torch.full(indices.shape, r, device=device))
             
@@ -148,18 +154,44 @@ def train(args):
             # D. Forward and Loss
             logits = model(masked_indices, text_tokens)
             
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), indices.view(-1), reduction='none')
-            loss = (loss * mask.view(-1)).sum() / (mask.sum() + 1e-8)
+            # Cross entropy only on masked tokens
+            loss_full = F.cross_entropy(logits.view(-1, logits.size(-1)), indices.view(-1), reduction='none')
+            loss = (loss_full * mask.view(-1)).sum() / (mask.sum() + 1e-8)
             
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
+            # E. Metrics Calculation
+            with torch.no_grad():
+                preds = torch.argmax(logits, dim=-1)
+                # Accuracy only on masked tokens
+                correct = (preds == indices) & (mask == 1)
+                accuracy = correct.sum().float() / (mask.sum() + 1e-8)
+                
             epoch_losses.append(loss.item())
-            pbar.set_description(f"Epoch {epoch} Loss: {loss.item():.4f}")
+            epoch_accs.append(accuracy.item())
+            
+            # F. Step Logging
+            if global_step % 10 == 0:
+                wandb.log({
+                    "train/step_loss": loss.item(),
+                    "train/step_accuracy": accuracy.item(),
+                    "train/mask_ratio": r,
+                    "train/lr": optimizer.param_groups[0]['lr'],
+                    "global_step": global_step
+                })
+            
+            pbar.set_description(f"Epoch {epoch} | Loss: {loss.item():.4f} | Acc: {accuracy.item():.4f}")
+            global_step += 1
             
         mean_loss = np.mean(epoch_losses)
-        wandb.log({"train/cftn_loss": mean_loss, "epoch": epoch})
+        mean_acc = np.mean(epoch_accs)
+        wandb.log({
+            "train/epoch_loss": mean_loss,
+            "train/epoch_accuracy": mean_acc,
+            "epoch": epoch
+        })
         
         if epoch % 10 == 0:
             sample = generate_samples(model, vqvae, tokenizer, test_prompt, num_samples=16, steps=config['cftn_params']['steps'], temp=config['cftn_params']['temperature'])
