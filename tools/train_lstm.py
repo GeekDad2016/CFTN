@@ -135,7 +135,7 @@ def generate_samples(model, vqvae_model, config, latent_shape, epoch):
     recon = (recon * 0.5 + 0.5).clamp(0, 1)
     
     grid = make_grid(recon.cpu(), nrow=4)
-    wandb.log({f"samples/epoch_{epoch}": wandb.Image(grid), "epoch": epoch})
+    wandb.log({f"samples/gen": wandb.Image(grid), "epoch": epoch})
     model.train()
 
 def train_lstm(args):
