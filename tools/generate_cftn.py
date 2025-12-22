@@ -57,7 +57,7 @@ def generate(prompt, steps=12, num_samples=4):
     for i in range(steps):
         # Calculate how many tokens to mask (Cosine Schedule)
         ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
-        num_to_keep = int(ratio * 1024)
+        num_to_keep = max(1, int(ratio * 1024))
         
         logits = model(cur_ids, text_tokens)
         probs = F.softmax(logits, dim=-1)
@@ -71,8 +71,18 @@ def generate(prompt, steps=12, num_samples=4):
             new_ids[b, topk_indices] = predictions[b, topk_indices]
         cur_ids = new_ids
 
-    # 3. Decode
+    # 3. Final Safety Check: Replace any remaining mask tokens with most likely predictions
+    if (cur_ids == model.mask_token_id).any():
+        logits = model(cur_ids, text_tokens)
+        predictions = torch.argmax(logits, dim=-1)
+        mask = (cur_ids == model.mask_token_id)
+        cur_ids[mask] = predictions[mask]
+
+    # 4. Decode
     indices = cur_ids.view(num_samples, 32, 32)
+    # Ensure indices are within valid VQ-VAE range [0, num_embeddings-1]
+    indices = torch.clamp(indices, 0, vqvae.vq.num_embeddings - 1)
+    
     embeddings = vqvae.vq.embedding(indices).permute(0, 3, 1, 2)
     output = vqvae.decoder(embeddings)
     output = (output * 0.5 + 0.5).clamp(0, 1)
@@ -90,7 +100,7 @@ def generate(prompt, steps=12, num_samples=4):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", type=str, default="Naruto standing in the forest, high quality digital art")
+    parser.add_argument("--prompt", type=str, default="A high quality digital art of Naruto")
     parser.add_argument("--steps", type=int, default=12)
     parser.add_argument("--num_samples", type=int, default=4)
     args = parser.parse_args()

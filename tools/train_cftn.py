@@ -23,34 +23,44 @@ def get_vqvae(config):
     return model
 
 @torch.no_grad()
-def generate_samples(model, vqvae, tokenizer, prompt, steps=12):
+def generate_samples(model, vqvae, tokenizer, prompt, num_samples=16, steps=12):
     model.eval()
     vqvae.eval()
     
     # 1. Prepare Inputs
-    text_tokens = tokenizer([prompt], padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
-    cur_ids = torch.full((1, 1024), model.mask_token_id).long().to(device)
+    text_tokens = tokenizer([prompt] * num_samples, padding='max_length', truncation=True, max_length=128, return_tensors="pt").input_ids.to(device)
+    cur_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
     
-    # 2. Iterative Parallel Decoding (MaskGIT logic)
+    # 2. Iterative Parallel Decoding
     for i in range(steps):
         # Calculate how many tokens to mask (Cosine Schedule)
         ratio = 1.0 - math.cos(((i + 1) / steps) * (math.pi / 2))
-        num_to_keep = int(ratio * 1024)
+        num_to_keep = max(1, int(ratio * 1024))
         
         logits = model(cur_ids, text_tokens)
         probs = F.softmax(logits, dim=-1)
         
         confidences, predictions = torch.max(probs, dim=-1)
         
-        # Keep the most confident tokens, mask the rest
-        _, topk_indices = torch.topk(confidences.view(-1), k=num_to_keep)
-        
-        new_ids = torch.full((1, 1024), model.mask_token_id).long().to(device)
-        new_ids.view(-1)[topk_indices] = predictions.view(-1)[topk_indices]
+        # Keep the most confident tokens, mask the rest per sample in batch
+        new_ids = torch.full((num_samples, 1024), model.mask_token_id).long().to(device)
+        for b in range(num_samples):
+            _, topk_indices = torch.topk(confidences[b], k=num_to_keep)
+            new_ids[b, topk_indices] = predictions[b, topk_indices]
         cur_ids = new_ids
 
-    # 3. Decode
-    indices = cur_ids.view(1, 32, 32)
+    # 3. Final Safety Check: Replace any remaining mask tokens with most likely predictions
+    if (cur_ids == model.mask_token_id).any():
+        logits = model(cur_ids, text_tokens)
+        predictions = torch.argmax(logits, dim=-1)
+        mask = (cur_ids == model.mask_token_id)
+        cur_ids[mask] = predictions[mask]
+
+    # 4. Decode
+    indices = cur_ids.view(num_samples, 32, 32)
+    # Ensure indices are within valid VQ-VAE range [0, num_embeddings-1]
+    indices = torch.clamp(indices, 0, vqvae.vq.num_embeddings - 1)
+    
     embeddings = vqvae.vq.embedding(indices).permute(0, 3, 1, 2)
     output = vqvae.decoder(embeddings)
     output = (output * 0.5 + 0.5).clamp(0, 1)
@@ -133,9 +143,10 @@ def train():
         
         # E. Validation generation
         if epoch % 10 == 0:
-            sample = generate_samples(model, vqvae, tokenizer, test_prompt)
+            sample = generate_samples(model, vqvae, tokenizer, test_prompt, num_samples=16)
+            grid = make_grid(sample, nrow=4)
             save_path = os.path.join(results_dir, f"epoch_{epoch}.png")
-            save_image(sample, save_path)
+            save_image(grid, save_path)
             wandb.log({"val/cftn_sample": wandb.Image(save_path)})
 
         checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
