@@ -10,6 +10,9 @@ import os
 import argparse
 import wandb
 
+# Silence tokenizer warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_vqvae(config):
@@ -37,14 +40,14 @@ def generate(prompt, steps=12, num_samples=4):
     model_path = os.path.join(config['train_params']['task_name'], "best_cftn.pth")
     if os.path.exists(model_path):
         print(f"Loading CFTN checkpoint from {model_path}")
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
     
     vqvae = get_vqvae(config)
     vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
     if os.path.exists(vqvae_ckpt):
         print(f"Loading VQ-VAE checkpoint from {vqvae_ckpt}")
-        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
+        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device, weights_only=True))
     vqvae.eval()
     
     wandb.init(project="vqvae-naruto-cftn-gen", config={"prompt": prompt, "steps": steps, "num_samples": num_samples})

@@ -14,6 +14,9 @@ import numpy as np
 from torchvision.utils import make_grid, save_image
 import math
 
+# Silence tokenizer warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_vqvae(config):
@@ -83,7 +86,7 @@ def train():
     vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
     if os.path.exists(vqvae_ckpt):
         print(f"Loading VQ-VAE checkpoint from {vqvae_ckpt}")
-        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device))
+        vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device, weights_only=True))
     vqvae.eval()
 
     # 4. Setup CFTN
