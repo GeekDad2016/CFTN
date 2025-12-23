@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 from .quantizer_v2 import VectorQuantizerEMA
 
 class Residual(nn.Module):
@@ -93,3 +94,18 @@ class VQVAEv2(nn.Module):
         vq_loss, quantized, perplexity, encoding_indices = self.vq(z)
         x_recon = self.decoder(quantized)
         return vq_loss, x_recon, perplexity, encoding_indices
+
+    def get_indices(self, x):
+        z = self.encoder(x)
+        _, _, _, indices = self.vq(z)
+        return indices.view(x.shape[0], -1)
+
+    def decode_indices(self, indices):
+        # indices: [B, L]
+        b, l = indices.shape
+        h = w = int(math.sqrt(l))
+        # vq.embedding is [num_embeddings, embedding_dim]
+        # quantized needs to be [B, embedding_dim, H, W]
+        z_q = self.vq.embedding(indices) # [B, L, embedding_dim]
+        z_q = z_q.permute(0, 2, 1).view(b, -1, h, w).contiguous()
+        return self.decoder(z_q)

@@ -38,13 +38,26 @@ transformer_params:
 
 cftn_params:
   n_layer: 12
-  n_head: 8s
-  n_embd: 256
+  n_head: 8
+  n_embd: 768
   embd_pdrop: 0.1
   resid_pdrop: 0.1
   attn_pdrop: 0.1
   lr: 0.0001
-  epochs: 10000
+  epochs: 500
   temperature: 1.0
   text_block_size: 128
   steps: 12
+
+cftn_v2_params:
+  n_layer: 12
+  n_head: 4
+  n_embd: 256
+  bridge_ratio: 0.33
+  epochs_bidirectional: 500
+  epochs_gen_only: 200
+  lr_text: 0.0002
+  lr_gate: 0.05
+  text_block_size: 256
+  eval_every: 10
+  target_img_loss: 0.1
