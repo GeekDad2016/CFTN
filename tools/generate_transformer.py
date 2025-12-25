@@ -3,6 +3,8 @@ import yaml
 import os
 import torch
 import pickle
+import numpy as np
+import random
 from tqdm import tqdm
 import torchvision
 from model.vqvae_v2 import VQVAEv2
@@ -32,8 +34,8 @@ def generate(args):
     encodings_path = os.path.join(config['train_params']['task_name'],
                                   config['train_params']['output_train_dir'],
                                   'encodings.pkl')
-    with open(encodings_path, 'rb') as f:
-        encodings = pickle.load(f)
+    # Load using torch.load with map_location='cpu' to handle GPU tensors in pickle
+    encodings = torch.load(encodings_path, map_location='cpu')
     
     latent_shape = (encodings.shape[1], encodings.shape[2])
     block_size = latent_shape[0] * latent_shape[1]
