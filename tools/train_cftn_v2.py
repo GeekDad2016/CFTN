@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, random_split
 from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
@@ -27,7 +27,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_vqvae(config):
-    # Filter out image_size which is used for dataset but not VQVAE init
     vqvae_params = {k: v for k, v in config['model_params'].items() if k != 'image_size'}
     model = VQVAEv2(**vqvae_params).to(device)
     return model
@@ -45,63 +44,122 @@ def calculate_psnr(img1, img2):
 def evaluate_brain(model, vq_model, tokenizer, device, val_loader, config, tag, use_wandb):
     model.eval()
     
+    # --- Part 1: PSNR Calculation (Image Metrics) ---
     total_psnr = 0
-    # 1. PSNR Calculation
+    # Loop over validation loader to calculate average PSNR
     for imgs, captions in val_loader:
         imgs = imgs.to(device)
         text_ids = tokenizer(captions, padding='max_length', truncation=True, 
                              max_length=config['cftn_v2_params']['text_block_size'], 
                              return_tensors="pt").input_ids.to(device)
         
-        # Predict tokens from text
         _, vis_logits = model(img_indices=None, text_ids=text_ids)
         pred_indices = torch.argmax(vis_logits, dim=-1) 
-        
         gen_imgs = vq_model.decode_indices(pred_indices)
-        gen_imgs = unnormalize(gen_imgs).clamp(0,1)
         
         gt_indices = vq_model.get_indices(imgs)
         gt_rec_imgs = vq_model.decode_indices(gt_indices)
-        gt_rec_imgs = unnormalize(gt_rec_imgs).clamp(0,1)
-
-        total_psnr += calculate_psnr(gen_imgs, gt_rec_imgs)
+        
+        total_psnr += calculate_psnr(unnormalize(gen_imgs), unnormalize(gt_rec_imgs))
     
     avg_psnr = total_psnr / len(val_loader)
     
-    # 2. Sample Generation
-    test_prompt = "Naruto standing in the forest, high quality digital art"
+    # --- Part 2: Image Generation Comparison (Greedy vs Temp) ---
+    test_prompt = "a person with blue hair in a military uniform standing in front of a building"
     tokens = tokenizer(test_prompt, return_tensors="pt", padding='max_length', 
                        max_length=config['cftn_v2_params']['text_block_size']).input_ids.to(device)
     
     _, vis_logits = model(img_indices=None, text_ids=tokens)
-    pred_indices = torch.argmax(vis_logits, dim=-1)
-    custom_img = vq_model.decode_indices(pred_indices)
-    custom_img = unnormalize(custom_img).clamp(0,1)
+    B, S, V = vis_logits.shape
+    flat_logits = vis_logits.view(-1, V) 
+    
+    # A. GREEDY
+    pred_greedy = torch.argmax(vis_logits, dim=-1)
+    img_greedy = unnormalize(vq_model.decode_indices(pred_greedy)).clamp(0,1)
 
-    # 3. Validation Grid
+    # B. TEMP 0.8
+    probs_1 = torch.softmax(flat_logits / 0.8, dim=-1)
+    pred_sampled_1 = torch.multinomial(probs_1, num_samples=1).view(B, S)
+    img_sampled_1 = unnormalize(vq_model.decode_indices(pred_sampled_1)).clamp(0,1)
+
+    # C. TEMP 1.0
+    probs_2 = torch.softmax(flat_logits / 1.0, dim=-1)
+    pred_sampled_2 = torch.multinomial(probs_2, num_samples=1).view(B, S)
+    img_sampled_2 = unnormalize(vq_model.decode_indices(pred_sampled_2)).clamp(0,1)
+
+    # --- Part 3: Validation Grid (Images) ---
     val_iter = iter(val_loader)
-    v_imgs, v_captions = next(val_iter)
-    v_text_ids = tokenizer(v_captions[:8], padding='max_length', truncation=True, 
+    v_imgs, v_captions = next(val_iter) # Get one batch
+    
+    # Prepare inputs for visualization
+    v_text_ids = tokenizer(v_captions[:3], padding='max_length', truncation=True, 
                            max_length=config['cftn_v2_params']['text_block_size'], 
                            return_tensors="pt").input_ids.to(device)
+    v_imgs_gpu = v_imgs[:3].to(device)
     
+    # Generate images from validation captions
     _, v_logits = model(img_indices=None, text_ids=v_text_ids)
-    v_pred = torch.argmax(v_logits, dim=-1)
-    v_gen = vq_model.decode_indices(v_pred)
-    v_gen = unnormalize(v_gen).clamp(0,1)
-
-    vis_grid = torch.cat([custom_img, v_gen[:7]], dim=0)
+    v_gen_greedy = unnormalize(vq_model.decode_indices(torch.argmax(v_logits, dim=-1))).clamp(0,1)
     
+    # Save Image Grid
+    vis_grid = torch.cat([img_greedy, img_sampled_1, img_sampled_2, v_gen_greedy], dim=0)
     results_dir = os.path.join(config['train_params']['task_name'], "cftn_v2_results")
     os.makedirs(results_dir, exist_ok=True)
-    save_path = os.path.join(results_dir, f"eval_{tag}.png")
-    save_image(vis_grid, save_path, nrow=4)
+    save_path = os.path.join(results_dir, f"eval_{tag}_comparison.png")
+    save_image(vis_grid, save_path, nrow=3) 
 
-    print(f"📊 Eval {tag} | PSNR: {avg_psnr:.2f} | Saved: {save_path}")
+    # --- Part 4: TEXT CAPTIONING EVALUATION (New) ---
+    # We will take the validation images (v_imgs_gpu) and ask the model to describe them.
+    # Since transformers are autoregressive for text, we generate word by word.
+    
+    print(f"\n📝 Evaluating Captioning on {len(v_imgs_gpu)} images...")
+    
+    # Get image indices from VQ-VAE
+    with torch.no_grad():
+        v_img_indices = vq_model.get_indices(v_imgs_gpu) # Shape: [3, 256] (or block_size)
+    
+    # Start tokens: [CLS] for BERT-based tokenizers (id 101)
+    # We create a tensor of shape [Batch, 1] containing the start token
+    start_token_id = tokenizer.cls_token_id
+    gen_text_ids = torch.tensor([[start_token_id]] * v_imgs_gpu.size(0), device=device)
+    
+    # Loop to generate text (max length 30 tokens for speed)
+    max_gen_len = 30 
+    for _ in range(max_gen_len):
+        # Predict next token based on Image + Current Text Sequence
+        txt_logits, _ = model(img_indices=v_img_indices, text_ids=gen_text_ids)
+        
+        # Look at the logits of the LAST token in the sequence
+        next_token_logits = txt_logits[:, -1, :] 
+        
+        # Greedy decoding (pick best word)
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(1)
+        
+        # Append to sequence
+        gen_text_ids = torch.cat((gen_text_ids, next_token), dim=1)
+        
+        # Stop early if all generated [SEP] (optional, skipped here for simplicity)
+
+    # Decode tokens to string
+    generated_captions = tokenizer.batch_decode(gen_text_ids, skip_special_tokens=True)
+    gt_captions_text = v_captions[:3] # Original ground truth strings
+
+    # Print and Prepare WandB Table
+    text_table_data = []
+    print("-" * 60)
+    for i in range(len(generated_captions)):
+        print(f"🖼️ Img {i} GT:   {gt_captions_text[i]}")
+        print(f"       Pred: {generated_captions[i]}")
+        text_table_data.append([tag, gt_captions_text[i], generated_captions[i]])
+    print("-" * 60)
+    print(f"📊 Eval {tag} | PSNR: {avg_psnr:.2f} | Image Saved: {save_path}")
+
     if use_wandb:
         wandb.log({
             "brain/eval_psnr": avg_psnr,
-            "brain/generation": wandb.Image(save_path, caption=f"Tag: {tag}")
+            "brain/generations_comparison": wandb.Image(save_path, caption=f"R1: Greedy/T0.8/T1.0"),
+            # Log the captions as a table
+            "brain/caption_samples": wandb.Table(columns=["Step", "Ground Truth", "Generated"], data=text_table_data)
         })
     
     model.train()
@@ -113,28 +171,42 @@ def train(args):
     
     # 2. Setup Tokenizer & Dataset
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    dataset = NarutoDataset(image_size=config['model_params']['image_size'])
-    loader = DataLoader(dataset, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
     
-    # 3. Load VQ-VAE (Pre-trained)
+    full_dataset = NarutoDataset(image_size=config['model_params']['image_size'])
+    dataset_size = len(full_dataset)
+    val_size = 16 
+    train_size = dataset_size - val_size
+    
+    train_ds, val_ds = random_split(
+        full_dataset, [train_size, val_size], 
+        generator=torch.Generator().manual_seed(42)
+    )
+    
+    loader = DataLoader(train_ds, batch_size=config['train_params']['batch_size'], shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_ds, batch_size=8, shuffle=False)
+    
+    # 3. Load VQ-VAE
     vqvae = get_vqvae(config)
     vqvae_ckpt = os.path.join(config['train_params']['task_name'], config['train_params']['ckpt_name'])
     if os.path.exists(vqvae_ckpt):
-        print(f"Loading VQ-VAE checkpoint from {vqvae_ckpt}")
+        print(f"Loading VQ-VAE from {vqvae_ckpt}")
         vqvae.load_state_dict(torch.load(vqvae_ckpt, map_location=device, weights_only=True))
     vqvae.eval()
     for p in vqvae.parameters(): p.requires_grad = False
 
     # 4. Setup Brain Model
+    img_size = config['model_params']['image_size']
+    downsample = 2 ** config['model_params']['num_downsampling_layers']
+    block_size = (img_size // downsample) ** 2
+    
     config['cftn_v2_params'].update({
-        'block_size': config['cftn_params']['block_size'],
+        'block_size': block_size,
         'vocab_size': config['model_params']['num_embeddings'],
         'text_vocab_size': tokenizer.vocab_size
     })
     
     model = BiHemisphericBrain(config['cftn_v2_params']).to(device)
     
-    # Optimizer
     gate_params = [p for n, p in model.named_parameters() if 'gate' in n]
     other_params = [p for n, p in model.named_parameters() if 'gate' not in n]
     optimizer = optim.AdamW([
@@ -142,14 +214,10 @@ def train(args):
         {'params': gate_params, 'lr': config['cftn_v2_params']['lr_gate']}
     ])
     
-    criterion = nn.CrossEntropyLoss()
+    # Losses
+    criterion_img = nn.CrossEntropyLoss()
+    criterion_text = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
     
-    # Validation Subset
-    val_indices = list(range(min(16, len(dataset))))
-    val_ds = Subset(dataset, val_indices)
-    val_loader = DataLoader(val_ds, batch_size=8, shuffle=False)
-
-    # Resume Logic
     start_epoch = 0
     stage = '2A_Bidirectional'
     checkpoint_path = os.path.join(config['train_params']['task_name'], "best_cftn_v2.pth")
@@ -166,7 +234,7 @@ def train(args):
 
     # --- STAGE 2A: Bidirectional Training ---
     if stage == '2A_Bidirectional':
-        print("🚀 STAGE 2A: Bidirectional Training (Gen + Captioning)...")
+        print("🚀 STAGE 2A: Bidirectional Training...")
         for epoch in range(start_epoch, config['cftn_v2_params']['epochs_bidirectional']):
             model.train()
             pbar = tqdm(loader)
@@ -183,31 +251,31 @@ def train(args):
                 
                 optimizer.zero_grad()
                 
-                # 50% Generation, 50% Captioning
-                if random.random() < 0.5:
-                    _, vis_logits = model(img_indices=None, text_ids=text_ids)
-                    loss = criterion(vis_logits.reshape(-1, config['model_params']['num_embeddings']), img_indices.reshape(-1))
-                    loss_gen.append(loss.item())
-                    
-                    preds = torch.argmax(vis_logits, dim=-1)
-                    acc = (preds == img_indices).float().mean().item() * 100
-                    acc_gen.append(acc)
-                else:
-                    # Captioning: predict next text token
-                    txt_logits, _ = model(img_indices=img_indices, text_ids=text_ids[:, :-1])
-                    loss = criterion(txt_logits.reshape(-1, tokenizer.vocab_size), text_ids[:, 1:].reshape(-1))
-                    loss_cap.append(loss.item())
-
+                # 1. Text -> Image
+                _, vis_logits = model(img_indices=None, text_ids=text_ids)
+                loss_g = criterion_img(vis_logits.reshape(-1, config['model_params']['num_embeddings']), img_indices.reshape(-1))
+                
+                # 2. Image -> Text
+                txt_logits, _ = model(img_indices=img_indices, text_ids=text_ids[:, :-1])
+                loss_c = criterion_text(txt_logits.reshape(-1, tokenizer.vocab_size), text_ids[:, 1:].reshape(-1))
+                
+                loss = loss_g + loss_c
                 loss.backward()
                 optimizer.step()
                 
-                pbar.set_description(f"Ep {epoch} | GenL: {np.mean(loss_gen) if loss_gen else 0:.3f} | CapL: {np.mean(loss_cap) if loss_cap else 0:.3f} | Acc: {np.mean(acc_gen) if acc_gen else 0:.1f}%")
+                preds = torch.argmax(vis_logits, dim=-1)
+                acc = (preds == img_indices).float().mean().item() * 100
+                loss_gen.append(loss_g.item())
+                loss_cap.append(loss_c.item())
+                acc_gen.append(acc)
+                
+                pbar.set_description(f"Ep {epoch} | GenL: {np.mean(loss_gen):.3f} | CapL: {np.mean(loss_cap):.3f} | Acc: {np.mean(acc_gen):.1f}%")
 
             if args.use_wandb:
                 wandb.log({
-                    "brain/gen_loss": np.mean(loss_gen) if loss_gen else 0, 
-                    "brain/cap_loss": np.mean(loss_cap) if loss_cap else 0, 
-                    "brain/vis_accuracy": np.mean(acc_gen) if acc_gen else 0,
+                    "brain/gen_loss": np.mean(loss_gen), 
+                    "brain/cap_loss": np.mean(loss_cap), 
+                    "brain/vis_accuracy": np.mean(acc_gen),
                     "epoch": epoch,
                     "stage": "2A_Bidirectional"
                 })
@@ -244,7 +312,7 @@ def train(args):
                 
                 optimizer.zero_grad()
                 _, vis_logits = model(img_indices=None, text_ids=text_ids)
-                loss = criterion(vis_logits.reshape(-1, config['model_params']['num_embeddings']), img_indices.reshape(-1))
+                loss = criterion_img(vis_logits.reshape(-1, config['model_params']['num_embeddings']), img_indices.reshape(-1))
                 
                 loss.backward()
                 optimizer.step()
