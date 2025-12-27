@@ -5,7 +5,7 @@ from PIL import Image
 
 class NarutoDataset(Dataset):
     def __init__(self, split='train', image_size=128):
-        self.dataset = load_dataset("lambdalabs/naruto-blip-captions", split=split)
+        self.dataset = load_dataset("kaipo/naruto-full-captions", split=split)
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
@@ -21,5 +21,5 @@ class NarutoDataset(Dataset):
         if image.mode == 'L': # handle grayscale images
             image = image.convert('RGB')
         
-        # The text is also available in item['text'] if needed
-        return self.transform(image), item['text']
+        # The text is also available in item['qwen_caption'] if needed
+        return self.transform(image), item['qwen_caption']
