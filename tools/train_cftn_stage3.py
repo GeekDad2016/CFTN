@@ -48,26 +48,26 @@ class RLCritic(nn.Module):
                               dtype=torch.float32, device=images.device).unsqueeze(0).unsqueeze(0)
         
         edge_maps = F.conv2d(gray, kernel, padding=1)
-        return edge_maps.var(dim=[1, 2, 3]) # Variance per image
+        
+        # FIX: The variance of a blob is tiny (e.g., 1e-5). 
+        # We multiply by a large factor to bring it into a readable range (e.g., 0.1 to 10.0)
+        return edge_maps.var(dim=[1, 2, 3]) * 1000.0  # <--- Multiply by 1000
 
     @torch.no_grad()
     def calculate_reward(self, generated_img, target_img):
-        """
-        Reward = -LPIPS + (Sharpness * lambda)
-        We want to Minimize LPIPS (distance) and Maximize Sharpness.
-        """
-        # 1. Perceptual Distance (Lower is better, so we negate it)
-        # generated_img and target_img should be in range [-1, 1]
-        p_loss = self.lpips_fn(generated_img, target_img).squeeze() # Shape: [Batch]
+        p_loss = self.lpips_fn(generated_img, target_img).squeeze()
         
-        # 2. Edge Sharpness (Higher is better)
-        # FIX: Clamp to prevent noise explosion (Reward Hacking)
         raw_sharpness = self.laplacian_variance(generated_img)
-        sharpness = torch.clamp(raw_sharpness, max=150.0) 
         
-        # Total Reward
-        # We negate p_loss because RL maximizes reward.
-        reward = -p_loss + (self.sharpness_weight * sharpness)
+        # Now that we multiplied by 1000, a "blob" might be 0.1 and a "sharp face" might be 10.0.
+        # We clamp at 50.0 to prevent the "static noise" explosion.
+        sharpness = torch.clamp(raw_sharpness, max=50.0) 
+        
+        # INCREASE WEIGHT slightly. 
+        # LPIPS is around 0.6. We want sharpness to compete.
+        # If sharpness is ~5.0, a weight of 0.1 gives 0.5 reward (comparable to LPIPS).
+        reward = -p_loss + (0.1 * sharpness) 
+        
         return reward, p_loss.mean().item(), raw_sharpness.mean().item()
 
 # ==========================================
@@ -177,8 +177,24 @@ def train_rl(args):
         for imgs, captions in pbar:
             imgs = imgs.to(device) # Target Real Images
             
+            # --- NEW: Text Augmentation (The "New Prompt" Simulator) ---
+            # Randomly delete words 30% of the time to break memorization
+            aug_captions = []
+            for cap in captions:
+                if np.random.rand() < 0.3: # 30% chance to augment
+                    words = cap.split()
+                    if len(words) > 3:
+                        drop_idx = np.random.randint(len(words))
+                        words.pop(drop_idx)
+                        aug_captions.append(" ".join(words))
+                    else:
+                        aug_captions.append(cap)
+                else:
+                    aug_captions.append(cap)
+            # -----------------------------------------------------------
+
             # Prepare Text
-            text_ids = tokenizer(captions, padding='max_length', truncation=True, 
+            text_ids = tokenizer(aug_captions, padding='max_length', truncation=True, 
                                  max_length=config['cftn_v2_params']['text_block_size'], 
                                  return_tensors="pt").input_ids.to(device)
             
@@ -204,8 +220,11 @@ def train_rl(args):
             # 1. Forward Pass (With Gradients)
             _, logits_policy = model(img_indices=None, text_ids=text_ids)
             
-            # 2. Sample from Distribution
-            probs = F.softmax(logits_policy, dim=-1)
+            # FIX: Increase Temperature to 1.2 or 1.5
+            # This makes the model less confident, forcing it to pick "riskier" tokens
+            # which might accidentally create a sharp edge, triggering the reward.
+            temperature = 1.2
+            probs = F.softmax(logits_policy / temperature, dim=-1)
             dist = Categorical(probs)
             
             # Sample actions (indices)
@@ -274,13 +293,19 @@ def train_rl(args):
         # Visual Check (Save Greedy vs Sampled comparison)
         if epoch % 5 == 0:
             with torch.no_grad():
-                vis_grid = torch.cat([unnormalize(imgs_baseline[:4]), unnormalize(imgs_sampled[:4])], dim=0)
+                num_vis = min(4, len(aug_captions))
+                vis_grid = torch.cat([unnormalize(imgs_baseline[:num_vis]), unnormalize(imgs_sampled[:num_vis])], dim=0)
                 save_file = os.path.join(config['train_params']['task_name'], f"rl_epoch_{epoch}.png")
-                save_image(vis_grid, save_file, nrow=4)
+                save_image(vis_grid, save_file, nrow=num_vis)
                 print(f"   📸 Saved RL comparison: {save_file}")
+                
+                # Format Captions for WandB (Using the Augmented ones to see what model saw)
+                vis_caps = aug_captions[:num_vis]
+                caption_str = f"Epoch {epoch} Prompts (Augmented):\n" + "\n".join([f"{i+1}. {c}" for i, c in enumerate(vis_caps)])
+                
                 if args.use_wandb:
                     wandb.log({
-                        "eval/rl_image": wandb.Image(save_file, caption=f"Epoch: {epoch}")
+                        "eval/rl_image": wandb.Image(save_file, caption=caption_str)
                     })
 
 if __name__ == "__main__":
