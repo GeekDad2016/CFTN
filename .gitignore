@@ -1,0 +1,27 @@
+# PyTorch
+*.pt
+*.pth
+*.bin
+
+# Data files
+*.pkl
+*.ipynb_checkpoints
+
+# Directories
+.ipynb_checkpoints/
+data/
+output/
+wandb/
+vqvae_naruto_v2/
+media_images_*.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Other
+.DS_Store
+download.png
+cftn_result.png
+Untitled.ipynb
