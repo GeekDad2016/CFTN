@@ -109,5 +109,14 @@ class BiHemisphericBrain(nn.Module):
             else:
                 h_L = lL(h_L, attn_mask=causal_mask)
                 h_R = lR(h_R)
+
+        # --- CORRECT (Preserve Spatial Grid as per user feedback) ---
+        # The vision head is applied to each token in the sequence.
+        # h_R has shape [Batch, Seq_Len_Img, Hidden_Dim], so the output of vision_head
+        # will have shape [Batch, Seq_Len_Img, Vocab_Size].
+        # We do NOT average over the sequence length, which would cause a loss of spatial information
+        # and result in "blob-like" images.
+        vis_logits = self.vision_head(h_R)
+        txt_logits = self.text_head(h_L)
         
-        return self.text_head(h_L), self.vision_head(h_R)
+        return txt_logits, vis_logits
